@@ -1,0 +1,11 @@
+// Export all controllers
+export * as authController from './auth.controller.js'
+export * as userController from './user.controller.js'
+export * as lessonController from './lesson.controller.js'
+export * as skillController from './skill.controller.js'
+export * as challengeController from './challenge.controller.js'
+export * as gameController from './game.controller.js'
+export * as communityController from './community.controller.js'
+export * as notificationController from './notification.controller.js'
+export * as chatbotController from './chatbot.controller.js'
+export * as leaderboardController from './leaderboard.controller.js'
