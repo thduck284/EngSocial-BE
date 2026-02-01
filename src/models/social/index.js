@@ -1,0 +1,6 @@
+export { default as Friendship } from './Friendship.js'
+export { default as Group } from './Group.js'
+export { default as GroupMember } from './GroupMember.js'
+export { default as Post } from './Post.js'
+export { default as PostLike } from './PostLike.js'
+export { default as Comment } from './Comment.js'
