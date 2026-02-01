@@ -4,21 +4,31 @@ import connectDB from './config/db.js'
 
 dotenv.config()
 
-const PORT = process.env.PORT || 3000
+const PORT = parseInt(process.env.PORT || '5000', 10)
 
-// Connect to MongoDB if URI is provided
-if (process.env.MONGODB_URI) {
-  connectDB().then(() => {
-    startServer()
-  })
-} else {
-  console.warn('MONGODB_URI not set - running without database')
-  startServer()
-}
+async function start() {
+  if (process.env.MONGODB_URI) {
+    await connectDB()
+  } else {
+    console.warn('MONGODB_URI not set - running without database')
+  }
 
-function startServer() {
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`)
     console.log(`API: http://localhost:${PORT}/api`)
   })
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`Port ${PORT} is already in use. Stop the other process or change PORT in .env`)
+    } else {
+      console.error(err)
+    }
+    process.exit(1)
+  })
 }
+
+start().catch((err) => {
+  console.error(err)
+  process.exit(1)
+})

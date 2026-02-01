@@ -10,14 +10,23 @@
     "db:schema": "mongosh \"$MONGODB_URI\" < database/mongodb-schema.js",
     "db:seed": "mongosh \"$MONGODB_URI\" < database/seed-data.js"
   },
-  "keywords": ["engsocial", "english", "learning", "api"],
+  "keywords": [
+    "engsocial",
+    "english",
+    "learning",
+    "api"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "mongoose": "^8.0.3"
+    "joi": "^18.0.2",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^8.0.3",
+    "nodemailer": "^7.0.13"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

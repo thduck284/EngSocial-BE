@@ -1,5 +1,5 @@
 // Auth Models
-export { User, RefreshToken } from './auth/index.js'
+export { User, RefreshToken, PasswordResetToken } from './auth/index.js'
 
 // Learning Models
 export { 

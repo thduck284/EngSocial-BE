@@ -2,16 +2,22 @@ import express from 'express'
 import cors from 'cors'
 import routes from './routes/index.js'
 import { notFound, errorHandler } from './middlewares/error.middleware.js'
+import { locale } from './middlewares/locale.middleware.js'
 
 const app = express()
 
 // Middleware
 app.use(cors({
-  origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:5173'],
+  origin: process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
+    : ['http://localhost:3000'],
   credentials: true,
 }))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
+
+// Language from frontend (Accept-Language header). req.language = 'vi' | 'en', default 'vi'
+app.use(locale)
 
 // Health check
 app.get('/api/health', (req, res) => {

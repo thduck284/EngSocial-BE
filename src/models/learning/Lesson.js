@@ -115,8 +115,7 @@ const lessonSchema = new mongoose.Schema({
   timestamps: true,
 })
 
-// Indexes
-lessonSchema.index({ slug: 1 }, { unique: true })
+// Indexes (slug đã có unique: true trong schema)
 lessonSchema.index({ skill: 1, status: 1 })
 lessonSchema.index({ skill: 1, level: 1 })
 lessonSchema.index({ topic: 1 })

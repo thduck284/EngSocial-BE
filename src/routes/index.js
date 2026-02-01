@@ -1,31 +1,19 @@
 import { Router } from 'express'
-import authRoutes from './auth.routes.js'
-import userRoutes from './user.routes.js'
-import lessonRoutes from './lesson.routes.js'
-import skillRoutes from './skill.routes.js'
-import challengeRoutes from './challenge.routes.js'
-import gameRoutes from './game.routes.js'
-import communityRoutes from './community.routes.js'
-import notificationRoutes from './notification.routes.js'
-import chatbotRoutes from './chatbot.routes.js'
-import leaderboardRoutes from './leaderboard.routes.js'
-import friendRoutes from './friend.routes.js'
-import groupRoutes from './group.routes.js'
+import authRoutes from './auth/index.js'
+import userRoutes from './user/index.js'
+import learningRoutes from './learning/index.js'
+import gamificationRoutes from './gamification/index.js'
+import socialRoutes from './social/index.js'
+import systemRoutes from './system/index.js'
 
 const router = Router()
 
-// Mount routes
+// Mount routes by module
 router.use('/auth', authRoutes)
 router.use('/user', userRoutes)
-router.use('/lessons', lessonRoutes)
-router.use('/skills', skillRoutes)
-router.use('/challenges', challengeRoutes)
-router.use('/games', gameRoutes)
-router.use('/community', communityRoutes)
-router.use('/notifications', notificationRoutes)
-router.use('/chatbot', chatbotRoutes)
-router.use('/leaderboard', leaderboardRoutes)
-router.use('/friends', friendRoutes)
-router.use('/groups', groupRoutes)
+router.use('/', learningRoutes) // /lessons, /skills
+router.use('/', gamificationRoutes) // /challenges, /games, /leaderboard
+router.use('/', socialRoutes) // /community, /friends, /groups
+router.use('/', systemRoutes) // /notifications, /chatbot
 
 export default router

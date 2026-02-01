@@ -104,8 +104,7 @@ const userSchema = new mongoose.Schema({
   timestamps: true,
 })
 
-// Indexes
-userSchema.index({ email: 1 }, { unique: true })
+// Indexes (email đã có unique: true trong schema)
 userSchema.index({ name: 'text' })
 userSchema.index({ totalXp: -1 })
 userSchema.index({ level: -1, xp: -1 })
