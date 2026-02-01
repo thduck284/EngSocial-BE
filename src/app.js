@@ -10,7 +10,7 @@ const app = express()
 app.use(cors({
   origin: process.env.CORS_ORIGIN
     ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
-    : ['http://localhost:3000'],
+    : ['https://eng-social-fe.vercel.app'],
   credentials: true,
 }))
 app.use(express.json())
