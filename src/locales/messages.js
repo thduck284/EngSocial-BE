@@ -28,6 +28,9 @@ const messages = {
       emailResetLinkLabel: 'Đặt lại mật khẩu',
       emailResetCopyHint: 'Nếu nút không hoạt động, sao chép và dán link sau vào trình duyệt:',
     },
+    user: {
+      profileUpdated: 'Cập nhật hồ sơ thành công.',
+    },
     common: {
       success: 'Thành công',
       error: 'Có lỗi xảy ra',
@@ -62,6 +65,9 @@ const messages = {
       emailResetBodyIntro: 'You requested a password reset. Click the button below to reset your password (link is single use, valid for 5 minutes).',
       emailResetLinkLabel: 'Reset password',
       emailResetCopyHint: 'If the button does not work, copy and paste this link into your browser:',
+    },
+    user: {
+      profileUpdated: 'Profile updated successfully.',
     },
     common: {
       success: 'Success',

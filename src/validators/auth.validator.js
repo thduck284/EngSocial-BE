@@ -36,6 +36,18 @@ export const registerSchema = Joi.object({
       'string.max': 'Tên không được quá 100 ký tự',
       'any.required': 'Tên là bắt buộc',
     }),
+  gender: Joi.string()
+    .valid('male', 'female', 'other')
+    .allow('', null)
+    .messages({
+      'any.only': 'Giới tính không hợp lệ',
+    }),
+  dateOfBirth: Joi.date()
+    .max('now')
+    .allow(null, '')
+    .messages({
+      'date.max': 'Ngày sinh không được ở tương lai',
+    }),
 })
 
 /**

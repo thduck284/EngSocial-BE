@@ -10,12 +10,7 @@
     "db:schema": "mongosh \"$MONGODB_URI\" < database/mongodb-schema.js",
     "db:seed": "mongosh \"$MONGODB_URI\" < database/seed-data.js"
   },
-  "keywords": [
-    "engsocial",
-    "english",
-    "learning",
-    "api"
-  ],
+  "keywords": ["engsocial", "english", "learning", "api"],
   "author": "",
   "license": "MIT",
   "dependencies": {

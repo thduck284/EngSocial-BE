@@ -6,7 +6,7 @@ import { UserDTO, AuthResponseDTO, RefreshTokenResponseDTO } from '../dto/index.
 /**
  * Register new user
  */
-export const register = async ({ email, password, name }) => {
+export const register = async ({ email, password, name, gender, dateOfBirth }) => {
   // Check if email already exists
   const existingUser = await User.findOne({ email })
   if (existingUser) {
@@ -16,14 +16,18 @@ export const register = async ({ email, password, name }) => {
   // Hash password
   const hashedPassword = await hashPassword(password)
 
-  // Create user
-  const user = await User.create({
+  // Build user payload
+  const userPayload = {
     email,
     password: hashedPassword,
     name,
-    status: 'active', // Auto-activate for now (skip email verification)
+    status: 'active',
     emailVerified: false,
-  })
+  }
+  if (gender && ['male', 'female', 'other'].includes(gender)) userPayload.gender = gender
+  if (dateOfBirth) userPayload.dateOfBirth = new Date(dateOfBirth)
+
+  const user = await User.create(userPayload)
 
   // Generate tokens
   const { accessToken, refreshToken } = generateTokenPair(user._id.toString())
@@ -149,6 +153,30 @@ export const updateUserPreferences = async (userId, updates) => {
     user.preferences.language = updates.language
   }
   user.markModified('preferences')
+  await user.save()
+  return new UserDTO(user)
+}
+
+/**
+ * Update user profile (name, phone, bio, address, dateOfBirth, gender, avatar).
+ * Chỉ cập nhật các field có trong updates.
+ */
+export const updateUserProfile = async (userId, updates) => {
+  const user = await User.findById(userId)
+  if (!user) throw new Error('USER_NOT_FOUND')
+
+  if (updates.name !== undefined) user.name = updates.name.trim()
+  if (updates.phone !== undefined) user.phone = updates.phone === '' ? undefined : updates.phone.trim()
+  if (updates.bio !== undefined) user.bio = updates.bio === '' ? undefined : updates.bio
+  if (updates.address !== undefined) user.address = updates.address === '' ? undefined : updates.address.trim()
+  if (updates.dateOfBirth !== undefined) {
+    user.dateOfBirth = updates.dateOfBirth ? new Date(updates.dateOfBirth) : null
+  }
+  if (updates.gender !== undefined) {
+    user.gender = ['male', 'female', 'other'].includes(updates.gender) ? updates.gender : ''
+  }
+  if (updates.avatar !== undefined) user.avatar = updates.avatar === '' ? undefined : updates.avatar
+
   await user.save()
   return new UserDTO(user)
 }

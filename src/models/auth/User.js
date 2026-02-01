@@ -27,6 +27,25 @@ const userSchema = new mongoose.Schema({
     type: String,
     maxlength: 500,
   },
+  phone: {
+    type: String,
+    trim: true,
+    maxlength: 20,
+  },
+  address: {
+    type: String,
+    trim: true,
+    maxlength: 300,
+  },
+  dateOfBirth: {
+    type: Date,
+    default: null,
+  },
+  gender: {
+    type: String,
+    enum: ['male', 'female', 'other', ''],
+    default: '',
+  },
   level: {
     type: Number,
     default: 1,

@@ -7,9 +7,9 @@ import { sendSuccess, sendError } from '../dto/index.js'
  */
 export const register = async (req, res, next) => {
   try {
-    const { email, password, name } = req.body
+    const { email, password, name, gender, dateOfBirth } = req.body
 
-    const data = await authService.register({ email, password, name })
+    const data = await authService.register({ email, password, name, gender, dateOfBirth })
 
     return sendSuccess(res, {
       statusCode: 201,
