@@ -1,0 +1,134 @@
+import { BaseDTO } from '../../base.dto.js'
+import { UserProfileDTO } from '../../auth/response/user.response.js'
+
+export class FriendshipDTO extends BaseDTO {
+  constructor(friendship) {
+    super({
+      id: friendship._id?.toString() || friendship.id,
+      userId: friendship.userId?.toString(),
+      friendId: friendship.friendId?.toString(),
+      status: friendship.status,
+      requestedBy: friendship.requestedBy?.toString(),
+      acceptedAt: friendship.acceptedAt,
+      createdAt: friendship.createdAt,
+      updatedAt: friendship.updatedAt,
+    })
+  }
+}
+
+export class GroupDTO extends BaseDTO {
+  constructor(group) {
+    super({
+      id: group._id?.toString() || group.id,
+      name: group.name,
+      slug: group.slug,
+      description: group.description,
+      icon: group.icon,
+      coverImage: group.coverImage,
+      color: group.color,
+      type: group.type,
+      category: group.category,
+      memberCount: group.memberCount,
+      postCount: group.postCount,
+      rules: group.rules,
+      status: group.status,
+      createdAt: group.createdAt,
+      updatedAt: group.updatedAt,
+    })
+  }
+}
+
+export class GroupMemberDTO extends BaseDTO {
+  constructor(member) {
+    super({
+      id: member._id?.toString() || member.id,
+      groupId: member.groupId?.toString(),
+      userId: member.userId?.toString(),
+      role: member.role,
+      status: member.status,
+      joinedAt: member.joinedAt,
+    })
+  }
+}
+
+export class PostDTO extends BaseDTO {
+  constructor(post) {
+    super({
+      id: post._id?.toString() || post.id,
+      authorId: post.authorId?.toString(),
+      groupId: post.groupId?.toString(),
+      content: post.content,
+      images: post.images,
+      video: post.video,
+      likeCount: post.likeCount,
+      commentCount: post.commentCount,
+      shareCount: post.shareCount,
+      lessonId: post.lessonId?.toString(),
+      challengeId: post.challengeId?.toString(),
+      visibility: post.visibility,
+      status: post.status,
+      tags: post.tags,
+      mentions: post.mentions?.map(id => id.toString()),
+      createdAt: post.createdAt,
+      updatedAt: post.updatedAt,
+    })
+  }
+}
+
+export class PostDetailDTO extends BaseDTO {
+  constructor(post, author) {
+    super({
+      id: post._id?.toString() || post.id,
+      author: author ? new UserProfileDTO(author) : null,
+      groupId: post.groupId?.toString(),
+      content: post.content,
+      images: post.images,
+      video: post.video,
+      likeCount: post.likeCount,
+      commentCount: post.commentCount,
+      shareCount: post.shareCount,
+      lessonId: post.lessonId?.toString(),
+      challengeId: post.challengeId?.toString(),
+      visibility: post.visibility,
+      status: post.status,
+      tags: post.tags,
+      mentions: post.mentions?.map(id => id.toString()),
+      createdAt: post.createdAt,
+      updatedAt: post.updatedAt,
+    })
+  }
+}
+
+export class CommentDTO extends BaseDTO {
+  constructor(comment) {
+    super({
+      id: comment._id?.toString() || comment.id,
+      postId: comment.postId?.toString(),
+      authorId: comment.authorId?.toString(),
+      parentId: comment.parentId?.toString(),
+      content: comment.content,
+      likeCount: comment.likeCount,
+      replyCount: comment.replyCount,
+      status: comment.status,
+      createdAt: comment.createdAt,
+      updatedAt: comment.updatedAt,
+    })
+  }
+}
+
+export class CommentDetailDTO extends BaseDTO {
+  constructor(comment, author) {
+    super({
+      id: comment._id?.toString() || comment.id,
+      postId: comment.postId?.toString(),
+      author: author ? new UserProfileDTO(author) : null,
+      parentId: comment.parentId?.toString(),
+      content: comment.content,
+      likeCount: comment.likeCount,
+      replyCount: comment.replyCount,
+      status: comment.status,
+      createdAt: comment.createdAt,
+      updatedAt: comment.updatedAt,
+    })
+  }
+}
