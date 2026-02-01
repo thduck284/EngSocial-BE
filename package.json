@@ -1,0 +1,28 @@
+{
+  "name": "engsocial-be",
+  "version": "0.1.0",
+  "description": "EngSocial - English Social Learning Platform Backend API",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:schema": "mongosh \"$MONGODB_URI\" < database/mongodb-schema.js",
+    "db:seed": "mongosh \"$MONGODB_URI\" < database/seed-data.js"
+  },
+  "keywords": ["engsocial", "english", "learning", "api"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "mongoose": "^8.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
