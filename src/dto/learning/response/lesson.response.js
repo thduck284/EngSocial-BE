@@ -22,6 +22,7 @@ export class LessonDTO extends BaseDTO {
       id: lesson._id?.toString() || lesson.id,
       title: lesson.title,
       slug: lesson.slug,
+      category: lesson.category || 'lesson',
       skill: lesson.skill,
       level: lesson.level,
       topic: lesson.topic,
@@ -36,6 +37,13 @@ export class LessonDTO extends BaseDTO {
       status: lesson.status,
       featured: lesson.featured,
       tags: lesson.tags,
+      time: lesson.time,
+      questions: lesson.totalQuestions ? `${lesson.totalQuestions} Questions` : '',
+      accent: lesson.accent,
+      type: lesson.practiceType,
+      practiceType: lesson.practiceType,
+      length: lesson.length,
+      order: lesson.order,
       createdAt: lesson.createdAt,
       updatedAt: lesson.updatedAt,
     })
@@ -44,6 +52,8 @@ export class LessonDTO extends BaseDTO {
 
 export class LessonDetailDTO extends BaseDTO {
   constructor(lesson) {
+    const content = lesson.content || {}
+    const accent = content.accent || lesson.accent || ''
     super({
       id: lesson._id?.toString() || lesson.id,
       title: lesson.title,
@@ -53,7 +63,7 @@ export class LessonDetailDTO extends BaseDTO {
       topic: lesson.topic,
       description: lesson.description,
       thumbnail: lesson.thumbnail,
-      content: lesson.content,
+      content: { ...content, accent },
       questions: lesson.questions,
       vocabulary: lesson.vocabulary,
       estimatedTime: lesson.estimatedTime,
@@ -65,6 +75,12 @@ export class LessonDetailDTO extends BaseDTO {
       status: lesson.status,
       featured: lesson.featured,
       tags: lesson.tags,
+      category: lesson.category,
+      time: lesson.time,
+      practiceType: lesson.practiceType,
+      length: lesson.length,
+      order: lesson.order,
+      accent: accent,
       createdAt: lesson.createdAt,
       updatedAt: lesson.updatedAt,
     })

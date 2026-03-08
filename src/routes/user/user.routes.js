@@ -2,6 +2,7 @@ import { Router } from 'express'
 import * as userController from '../../controllers/user.controller.js'
 import { auth } from '../../middlewares/auth.middleware.js'
 import { validate } from '../../middlewares/validate.middleware.js'
+import { uploadAvatar as uploadAvatarMw } from '../../middlewares/upload.middleware.js'
 import { updateProfileSchema } from '../../validators/user.validator.js'
 
 const router = Router()
@@ -19,5 +20,25 @@ router.get('/profile', auth, userController.getProfile)
  * @access  Private
  */
 router.patch('/profile', auth, validate(updateProfileSchema), userController.updateProfile)
+
+/**
+ * @route   POST /api/user/avatar
+ * @desc    Upload avatar (multipart/form-data, field: avatar)
+ * @access  Private
+ */
+router.post('/avatar', auth, (req, res, next) => {
+  uploadAvatarMw(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ success: false, message: req.language === 'en' ? 'File too large (max 5MB)' : 'File quá lớn (tối đa 5MB)' })
+      }
+      if (err.message === 'INVALID_IMAGE_TYPE') {
+        return res.status(400).json({ success: false, message: req.language === 'en' ? 'Invalid image type (JPEG, PNG, GIF, WebP only)' : 'Định dạng ảnh không hợp lệ (chỉ JPEG, PNG, GIF, WebP)' })
+      }
+      return next(err)
+    }
+    next()
+  })
+}, userController.uploadAvatar)
 
 export default router

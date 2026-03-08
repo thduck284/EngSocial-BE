@@ -54,6 +54,12 @@ const lessonSchema = new mongoose.Schema({
     enum: ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'],
     required: true,
   },
+  // Phân loại: lesson (bài học) | practice (bài luyện)
+  category: {
+    type: String,
+    enum: ['lesson', 'practice'],
+    default: 'lesson',
+  },
   topic: String,
   description: {
     type: String,
@@ -65,6 +71,7 @@ const lessonSchema = new mongoose.Schema({
   content: {
     // Reading
     text: String,
+    translationVi: String, // Bản dịch tiếng Việt đoạn đọc (optional)
     wordCount: Number,
     
     // Listening
@@ -73,7 +80,7 @@ const lessonSchema = new mongoose.Schema({
     duration: Number, // seconds
     accent: {
       type: String,
-      enum: ['american', 'british', 'australian'],
+      enum: ['', 'american', 'british', 'australian'],
     },
     speed: { type: Number, default: 1.0 },
     chapters: [chapterSchema],
@@ -104,6 +111,12 @@ const lessonSchema = new mongoose.Schema({
     default: 'draft',
   },
   featured: { type: Boolean, default: false },
+  // Practice-specific (cho category=practice)
+  time: { type: String, default: '10m' }, // e.g. "15m", "30 min"
+  accent: { type: String, default: '' }, // Listening accent
+  practiceType: { type: String, default: '' }, // e.g. "Email Practice", "Essay"
+  length: { type: String, default: '' }, // e.g. "100-150 words"
+  order: { type: Number, default: 0 },
   tags: [String],
   
   createdBy: {
@@ -117,6 +130,7 @@ const lessonSchema = new mongoose.Schema({
 
 // Indexes (slug đã có unique: true trong schema)
 lessonSchema.index({ skill: 1, status: 1 })
+lessonSchema.index({ category: 1, skill: 1, status: 1 })
 lessonSchema.index({ skill: 1, level: 1 })
 lessonSchema.index({ topic: 1 })
 lessonSchema.index({ featured: 1, status: 1 })

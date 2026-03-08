@@ -30,6 +30,7 @@ const messages = {
     },
     user: {
       profileUpdated: 'Cập nhật hồ sơ thành công.',
+      avatarRequired: 'Vui lòng chọn ảnh.',
     },
     common: {
       success: 'Thành công',
@@ -68,6 +69,7 @@ const messages = {
     },
     user: {
       profileUpdated: 'Profile updated successfully.',
+      avatarRequired: 'Please select an image.',
     },
     common: {
       success: 'Success',

@@ -175,10 +175,14 @@ export const updateUserProfile = async (userId, updates) => {
   if (updates.gender !== undefined) {
     user.gender = ['male', 'female', 'other'].includes(updates.gender) ? updates.gender : ''
   }
-  if (updates.avatar !== undefined) user.avatar = updates.avatar === '' ? undefined : updates.avatar
+  if (updates.avatar !== undefined) {
+    user.avatar = updates.avatar === '' ? undefined : updates.avatar
+    user.markModified('avatar')
+  }
 
   await user.save()
-  return new UserDTO(user)
+  const updated = await User.findById(userId)
+  return new UserDTO(updated)
 }
 
 /**

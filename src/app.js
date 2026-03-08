@@ -10,7 +10,7 @@ const app = express()
 app.use(cors({
   origin: process.env.CORS_ORIGIN
     ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
-    : ['https://eng-social-fe.vercel.app'],
+    : ['https://eng-social-fe.vercel.app', 'http://localhost:3000'],
   credentials: true,
 }))
 app.use(express.json())
@@ -36,8 +36,11 @@ app.get('/api', (req, res) => {
     docs: '/api/health',
     endpoints: {
       auth: '/api/auth',
+      raw: '/api/raw',
       user: '/api/user',
       lessons: '/api/lessons',
+      practices: '/api/practices',
+      quests: '/api/quests',
       skills: '/api/skills',
       challenges: '/api/challenges',
       games: '/api/games',

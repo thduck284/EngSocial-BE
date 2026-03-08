@@ -31,7 +31,8 @@ npm run dev
 | `npm run dev` | Start development server (with watch) |
 | `npm start` | Start production server |
 | `npm run db:schema` | Run MongoDB schema (requires MONGODB_URI) |
-| `npm run db:seed` | Run seed data |
+| `npm run db:seed` | Run seed data (mongosh) |
+| `npm run db:seed:all` | Seed lessons + practices + quests (Node, dùng cho Atlas) |
 
 ## 📁 Project Structure
 

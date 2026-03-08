@@ -1,10 +1,10 @@
 import { Router } from 'express'
+import * as communityController from '../../controllers/community.controller.js'
+import { auth } from '../../middlewares/index.js'
 
 const router = Router()
 
-// TODO: Implement community routes
-router.get('/posts', (req, res) => {
-  res.status(501).json({ success: false, message: 'Not implemented yet' })
-})
+router.get('/posts', communityController.getPosts)
+router.post('/posts', auth, communityController.createPost)
 
 export default router

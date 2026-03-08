@@ -7,6 +7,13 @@ const answerSchema = new mongoose.Schema({
   answeredAt: Date,
 }, { _id: false })
 
+const noteSchema = new mongoose.Schema({
+  title: { type: String, default: '' },
+  content: { type: String, default: '' },
+  category: { type: String, enum: ['grammar', 'vocab', 'idea'], default: 'grammar' },
+  createdAt: { type: Date, default: Date.now },
+}, { _id: false })
+
 const userLessonProgressSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -43,6 +50,7 @@ const userLessonProgressSchema = new mongoose.Schema({
   startedAt: Date,
   completedAt: Date,
   lastAccessedAt: Date,
+  notes: [noteSchema],
 }, { timestamps: true })
 
 userLessonProgressSchema.index({ userId: 1, lessonId: 1 }, { unique: true })
