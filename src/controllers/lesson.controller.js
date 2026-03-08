@@ -214,9 +214,9 @@ export const deleteLesson = async (req, res, next) => {
 }
 
 /**
- * Get reading lesson content - lấy từ DB
+ * Get reading lesson content - l?y t? DB
  * GET /api/lessons/reading/:id/content
- * :id có thể là _id hoặc slug
+ * :id c� th? l� _id ho?c slug
  */
 export const getReadingContent = async (req, res, next) => {
   try {
@@ -279,7 +279,7 @@ export const getReadingContent = async (req, res, next) => {
 }
 
 /**
- * Get listening lesson content - lấy từ DB (full data cho trang bài học)
+ * Get listening lesson content - l?y t? DB (full data cho trang b�i h?c)
  * GET /api/lessons/listening/:id/content
  */
 export const getListeningContent = async (req, res, next) => {
@@ -372,9 +372,9 @@ export const getListeningContent = async (req, res, next) => {
 }
 
 /**
- * Get writing lesson content - lấy từ DB
+ * Get writing lesson content - l?y t? DB
  * GET /api/lessons/writing/:id/content
- * :id có thể là _id hoặc slug
+ * :id c� th? l� _id ho?c slug
  */
 export const getWritingContent = async (req, res, next) => {
   try {
@@ -397,7 +397,7 @@ export const getWritingContent = async (req, res, next) => {
       title: lesson.title,
       level: lesson.level,
       topic: lesson.topic,
-      time: `${lesson.estimatedTime || 15} phút`,
+      time: `${lesson.estimatedTime || 15} ph�t`,
       xpReward: lesson.xpReward || 50,
       thumbnail: lesson.thumbnail,
       prompt: lesson.content?.prompt || '',
@@ -530,7 +530,7 @@ export const updateLessonProgress = async (req, res, next) => {
 /**
  * Mark lesson as completed for the current user
  * POST /api/lessons/:id/complete (auth)
- * Lưu vào UserLessonProgress: status = 'completed', progress = 100, completedAt = now
+ * Luu v�o UserLessonProgress: status = 'completed', progress = 100, completedAt = now
  */
 export const completeLesson = async (req, res, next) => {
   try {

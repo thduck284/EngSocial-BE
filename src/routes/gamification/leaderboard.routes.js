@@ -1,10 +1,10 @@
 import { Router } from 'express'
+import * as leaderboardController from '../../controllers/leaderboard.controller.js'
+import { auth } from '../../middlewares/auth.middleware.js'
 
 const router = Router()
 
-// TODO: Implement leaderboard routes
-router.get('/', (req, res) => {
-  res.status(501).json({ success: false, message: 'Not implemented yet' })
-})
+router.get('/', leaderboardController.getLeaderboard)
+router.post('/generate', auth, leaderboardController.generateLeaderboard)
 
 export default router

@@ -1,10 +1,14 @@
 import { Router } from 'express'
+import * as gameController from '../../controllers/game.controller.js'
+import { auth } from '../../middlewares/auth.middleware.js'
 
 const router = Router()
 
-// TODO: Implement game routes
-router.get('/', (req, res) => {
-  res.status(501).json({ success: false, message: 'Not implemented yet' })
-})
+router.get('/', gameController.getGames)
+router.get('/history', auth, gameController.getUserHistory)
+router.get('/:id', gameController.getGameById)
+router.post('/', auth, gameController.createGame)
+router.post('/:id/start', auth, gameController.startSession)
+router.post('/sessions/:sessionId/submit', auth, gameController.submitSession)
 
 export default router
