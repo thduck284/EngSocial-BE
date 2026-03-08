@@ -1,9 +1,29 @@
 import * as friendService from '../services/friend.service.js'
+import * as notificationService from '../services/notification.service.js'
+import { User } from '../models/index.js'
 import { sendSuccess, sendError, sendPaginated } from '../dto/index.js'
+import { emitToUser } from '../config/socket.js'
 
 export const sendRequest = async (req, res, next) => {
   try {
     const friendship = await friendService.sendFriendRequest(req.userId, req.params.userId)
+    const receiverId = req.params.userId
+    const sender = await User.findById(req.userId).select('name').lean()
+    const senderName = sender?.name || 'Someone'
+    const notification = await notificationService.createNotification({
+      userId: receiverId,
+      type: 'friend_request',
+      title: 'Friend request',
+      message: `${senderName} sent you a friend request`,
+      fromUserId: req.userId,
+      relatedId: friendship.id,
+      relatedType: 'user',
+      data: { friendshipId: friendship.id, fromUserName: senderName },
+    })
+    const io = req.app.get('io')
+    if (io) {
+      emitToUser(io, receiverId, 'notification', notification)
+    }
     return sendSuccess(res, {
       statusCode: 201,
       messageKey: 'friend.requestSent',
@@ -26,6 +46,24 @@ export const sendRequest = async (req, res, next) => {
 export const acceptRequest = async (req, res, next) => {
   try {
     const friendship = await friendService.acceptFriendRequest(req.userId, req.params.id)
+    const recipientId = friendship.userId
+    const accepterId = friendship.friendId
+    const accepter = await User.findById(accepterId).select('name').lean()
+    const accepterName = accepter?.name || 'Someone'
+    const notification = await notificationService.createNotification({
+      userId: recipientId,
+      type: 'friend_request_accepted',
+      title: 'Friend request accepted',
+      message: `${accepterName} accepted your friend request`,
+      fromUserId: accepterId,
+      relatedId: friendship.id,
+      relatedType: 'user',
+      data: { friendshipId: friendship.id, accepterName },
+    })
+    const io = req.app.get('io')
+    if (io) {
+      emitToUser(io, recipientId, 'notification', notification)
+    }
     return sendSuccess(res, {
       messageKey: 'friend.requestAccepted',
       data: { friendship },
@@ -100,6 +138,25 @@ export const getSentRequests = async (req, res, next) => {
     return sendPaginated(res, {
       messageKey: 'friend.sentSuccess',
       data: result.requests,
+      pagination: result.pagination,
+    }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const searchFriends = async (req, res, next) => {
+  try {
+    const { q, page, limit, friendFilter } = req.query
+    const result = await friendService.searchUsersForFriends(req.userId, {
+      q,
+      page,
+      limit,
+      friendFilter: friendFilter || 'all',
+    })
+    return sendPaginated(res, {
+      messageKey: 'friend.searchSuccess',
+      data: result.users,
       pagination: result.pagination,
     }, req)
   } catch (error) {

@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import { User, RefreshToken, PasswordResetToken } from '../models/index.js'
 import { hashPassword, comparePassword, generateTokenPair } from '../utils/index.js'
 import { UserDTO, AuthResponseDTO, RefreshTokenResponseDTO } from '../dto/index.js'
+import { indexUser } from '../elasticsearch/userSearch.service.js'
 
 /**
  * Register new user
@@ -28,6 +29,9 @@ export const register = async ({ email, password, name, gender, dateOfBirth }) =
   if (dateOfBirth) userPayload.dateOfBirth = new Date(dateOfBirth)
 
   const user = await User.create(userPayload)
+  try {
+    await indexUser({ id: user._id.toString(), name: user.name, email: user.email, updatedAt: user.updatedAt })
+  } catch (_) {}
 
   // Generate tokens
   const { accessToken, refreshToken } = generateTokenPair(user._id.toString())
@@ -182,6 +186,14 @@ export const updateUserProfile = async (userId, updates) => {
 
   await user.save()
   const updated = await User.findById(userId)
+  try {
+    await indexUser({
+      id: updated._id.toString(),
+      name: updated.name,
+      email: updated.email,
+      updatedAt: updated.updatedAt,
+    })
+  } catch (_) {}
   return new UserDTO(updated)
 }
 

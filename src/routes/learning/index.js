@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import lessonRoutes from './lesson.routes.js'
+import practiceRoutes from './practice.routes.js'
 import skillRoutes from './skill.routes.js'
 //import dailyGoalRoutes from './dailygoal.routes.js'
 

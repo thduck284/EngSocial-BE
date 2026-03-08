@@ -73,6 +73,8 @@ const userSchema = new mongoose.Schema({
     min: 0,
   },
   lastActiveDate: Date,
+  /** Lần truy cập cuối (cập nhật khi gọi API); dùng cho tin nhắn tự xóa khi offline 5p */
+  lastAccessedAt: Date,
   preferences: {
     language: {
       type: String,

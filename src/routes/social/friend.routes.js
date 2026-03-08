@@ -5,6 +5,7 @@ import { auth } from '../../middlewares/auth.middleware.js'
 const router = Router()
 
 router.get('/', auth, friendController.getFriends)
+router.get('/search', auth, friendController.searchFriends)
 router.get('/requests/pending', auth, friendController.getPendingRequests)
 router.get('/requests/sent', auth, friendController.getSentRequests)
 router.post('/request/:userId', auth, friendController.sendRequest)

@@ -1,6 +1,9 @@
 import 'dotenv/config'
+import http from 'http'
+import { Server as SocketIOServer } from 'socket.io'
 import app from './app.js'
 import connectDB from './config/db.js'
+import { socketOptions, setupSocket } from './config/socket.js'
 
 const PORT = parseInt(process.env.PORT || '5000', 10)
 let server = null
@@ -29,9 +32,28 @@ async function start() {
     console.warn('MONGODB_URI not set - running without database')
   }
 
-  server = app.listen(PORT, () => {
+  if (process.env.MONGODB_URI && (process.env.ELASTICSEARCH_NODE || process.env.ELASTICSEARCH_URL)) {
+    try {
+      const { initUserSearch } = await import('./elasticsearch/userSearch.service.js')
+      const { User } = await import('./models/index.js')
+      await initUserSearch(async () => {
+        const list = await User.find({}).select('name email updatedAt').lean()
+        return list.map((u) => ({ id: u._id.toString(), name: u.name, email: u.email, updatedAt: u.updatedAt }))
+      })
+    } catch (err) {
+      console.warn('Elasticsearch init failed:', err?.message)
+    }
+  }
+
+  server = http.createServer(app)
+  const io = new SocketIOServer(server, socketOptions)
+  app.set('io', io)
+  setupSocket(io)
+
+  server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`)
     console.log(`API: http://localhost:${PORT}/api`)
+    console.log(`Socket.IO: enabled`)
   })
 
   server.on('error', (err) => {

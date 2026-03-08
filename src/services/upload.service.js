@@ -68,3 +68,27 @@ export const uploadDocument = async (buffer, mimetype, folder = 'engsocial/docum
   })
   return result.secure_url
 }
+
+const imageMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+/** Video mimetypes for message attachments (MOV, AVI, etc. go through uploadVideo) */
+const videoMimes = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/x-ms-wmv']
+/** Audio mimetypes for message attachments (.mp3, .wav, etc.) */
+const audioMimes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/mp4', 'audio/webm', 'audio/ogg']
+
+/**
+ * Upload message attachment (image, video, audio, or document) - returns URL
+ */
+export const uploadMessageAttachment = async (buffer, mimetype, originalName) => {
+  const folder = 'engsocial/messages'
+  const mime = (mimetype || '').toLowerCase()
+  if (imageMimes.includes(mime) || mime.startsWith('image/')) {
+    return uploadImage(buffer, mimetype, folder)
+  }
+  if (videoMimes.includes(mime) || mime.startsWith('video/')) {
+    return uploadVideo(buffer, mimetype, folder)
+  }
+  if (audioMimes.includes(mime) || mime.startsWith('audio/')) {
+    return uploadAudio(buffer, mimetype, folder)
+  }
+  return uploadDocument(buffer, mimetype, folder)
+}

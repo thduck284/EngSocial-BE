@@ -30,6 +30,7 @@ const messages = {
     },
     user: {
       profileUpdated: 'Cập nhật hồ sơ thành công.',
+      profileFetched: 'Lấy thông tin hồ sơ thành công.',
       avatarRequired: 'Vui lòng chọn ảnh.',
     },
     lesson: {
@@ -104,6 +105,12 @@ const messages = {
       alreadySent: 'Đã gửi lời mời kết bạn',
       cannotAddSelf: 'Không thể tự kết bạn với chính mình',
       notFriends: 'Không phải bạn bè',
+      searchSuccess: 'Tìm kiếm bạn bè thành công',
+      blocked: 'Người dùng này đã bị chặn',
+    },
+    conversation: {
+      cannotChatSelf: 'Không thể nhắn tin với chính mình',
+      notFound: 'Không tìm thấy cuộc trò chuyện',
     },
     group: {
       fetchSuccess: 'Lấy danh sách nhóm thành công',
@@ -156,6 +163,8 @@ const messages = {
       validationFailed: 'Dữ liệu không hợp lệ',
       routeNotFound: 'Route {{url}} không tồn tại',
       fieldExists: '{{field}} đã tồn tại',
+      forbidden: 'Bạn không có quyền thực hiện',
+      missingParam: 'Thiếu tham số',
       invalidId: 'ID không hợp lệ',
       serverError: 'Lỗi server',
       forbidden: 'Bạn không có quyền thực hiện hành động này',
@@ -188,6 +197,7 @@ const messages = {
     },
     user: {
       profileUpdated: 'Profile updated successfully.',
+      profileFetched: 'Profile retrieved successfully.',
       avatarRequired: 'Please select an image.',
     },
     lesson: {
@@ -262,6 +272,12 @@ const messages = {
       alreadySent: 'Friend request already sent',
       cannotAddSelf: 'Cannot send friend request to yourself',
       notFriends: 'Not friends',
+      searchSuccess: 'Friend search completed successfully',
+      blocked: 'This user is blocked',
+    },
+    conversation: {
+      cannotChatSelf: 'Cannot chat with yourself',
+      notFound: 'Conversation not found',
     },
     group: {
       fetchSuccess: 'Groups retrieved successfully',
@@ -314,6 +330,8 @@ const messages = {
       validationFailed: 'Invalid data',
       routeNotFound: 'Route {{url}} not found',
       fieldExists: '{{field}} already exists',
+      forbidden: 'You do not have permission',
+      missingParam: 'Missing parameter',
       invalidId: 'Invalid ID',
       serverError: 'Server error',
       forbidden: 'You do not have permission to perform this action',

@@ -15,6 +15,13 @@ const router = Router()
 router.get('/profile', auth, userController.getProfile)
 
 /**
+ * @route   GET /api/user/profile/:userId
+ * @desc    Get public profile of another user (cần đăng nhập)
+ * @access  Private
+ */
+router.get('/profile/:userId', auth, userController.getPublicProfile)
+
+/**
  * @route   PATCH /api/user/profile
  * @desc    Update current user profile (name, phone, bio, address, dateOfBirth, gender, avatar)
  * @access  Private
