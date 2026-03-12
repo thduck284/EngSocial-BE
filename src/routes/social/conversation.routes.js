@@ -7,6 +7,7 @@ import { sendError } from '../../dto/index.js'
 const router = Router()
 
 router.get('/', auth, conversationController.getMyConversations)
+router.post('/', auth, conversationController.createConversation)
 router.get('/unread-total', auth, conversationController.getUnreadTotal)
 router.get('/with', auth, conversationController.getOrCreateWithUser) // /conversations/with?with=userId
 router.get('/attachment-download', auth, conversationController.downloadMessageAttachment)
@@ -44,5 +45,12 @@ router.post('/:id/messages', auth, (req, res, next) => {
 }, conversationController.sendMessage)
 router.patch('/:id/read', auth, conversationController.markAsRead)
 router.patch('/:id/settings', auth, conversationController.updateConversationSettings)
+router.patch('/:id/group-settings', auth, conversationController.updateGroupSettings)
+router.post('/:id/members', auth, conversationController.addMembersToGroup)
+router.patch('/:id/members/:userId/role', auth, conversationController.setMemberRole)
+router.post('/:id/disband', auth, conversationController.disbandGroup)
+router.post('/:id/leave', auth, conversationController.leaveGroup)
+router.post('/:id/block', auth, conversationController.blockUserInGroup)
+router.delete('/:id/block/:userId', auth, conversationController.unblockUserInGroup)
 
 export default router

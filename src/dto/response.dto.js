@@ -54,13 +54,14 @@ export class ApiResponse {
   }
 
   /**
-   * Error response
+   * Error response (data optional, e.g. existingConversationId khi nhóm trùng thành viên)
    */
-  static error({ message = 'Có lỗi xảy ra', errors = null }) {
+  static error({ message = 'Có lỗi xảy ra', errors = null, data = null }) {
     return new ApiResponse({
       success: false,
       message,
       errors,
+      data,
     })
   }
 
@@ -94,10 +95,10 @@ export const sendSuccess = (res, options = {}, req = null) => {
  * sendError(res, { statusCode: 401, messageKey: 'auth.tokenNotFound' }, req)
  */
 export const sendError = (res, options = {}, req = null) => {
-  const { statusCode = 500, messageKey, messageParams, message, errors } = options
+  const { statusCode = 500, messageKey, messageParams, message, errors, data } = options
   const resolvedMessage = resolveErrorMessage(req, { messageKey, messageParams, message })
   return res.status(statusCode).json(
-    ApiResponse.error({ message: resolvedMessage, errors })
+    ApiResponse.error({ message: resolvedMessage, errors, data })
   )
 }
 

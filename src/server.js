@@ -28,6 +28,13 @@ process.on('SIGTERM', shutdown('SIGTERM'))
 async function start() {
   if (process.env.MONGODB_URI) {
     await connectDB()
+    try {
+      const { default: Conversation } = await import('./models/social/Conversation.js')
+      await Conversation.collection.dropIndex('participants_1_type_1')
+      console.log('Dropped old unique index participants_1_type_1 (if existed)')
+    } catch (e) {
+      if (e.code !== 27 && e.codeName !== 'IndexNotFound') console.warn('Conversation index drop:', e?.message || e)
+    }
   } else {
     console.warn('MONGODB_URI not set - running without database')
   }

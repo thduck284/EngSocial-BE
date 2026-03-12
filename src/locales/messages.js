@@ -111,6 +111,8 @@ const messages = {
     conversation: {
       cannotChatSelf: 'Không thể nhắn tin với chính mình',
       notFound: 'Không tìm thấy cuộc trò chuyện',
+      groupParticipantsAlreadyExists: 'Đã tồn tại nhóm với các thành viên này.',
+      groupNeedTwoMembers: 'Chọn ít nhất 2 thành viên.',
     },
     group: {
       fetchSuccess: 'Lấy danh sách nhóm thành công',
@@ -278,6 +280,8 @@ const messages = {
     conversation: {
       cannotChatSelf: 'Cannot chat with yourself',
       notFound: 'Conversation not found',
+      groupParticipantsAlreadyExists: 'A group with these members already exists.',
+      groupNeedTwoMembers: 'Select at least 2 members.',
     },
     group: {
       fetchSuccess: 'Groups retrieved successfully',

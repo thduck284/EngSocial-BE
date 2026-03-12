@@ -28,6 +28,36 @@ export const getOrCreateWithUser = async (req, res, next) => {
 }
 
 /**
+ * POST /conversations => create group conversation (body: { type: 'group', name, participantIds })
+ */
+export const createConversation = async (req, res, next) => {
+  try {
+    if (req.body?.type !== 'group') {
+      return sendError(res, { statusCode: 400, messageKey: 'common.missingParam', message: 'Only type group is supported' }, req)
+    }
+    const name = req.body?.name
+    const avatar = req.body?.avatar
+    const participantIds = req.body?.participantIds
+    const result = await conversationService.createGroupConversation(req.userId, { name, avatar, participantIds })
+    return sendSuccess(res, { statusCode: 201, data: result }, req)
+  } catch (error) {
+    if (error.message === 'GROUP_NEED_AT_LEAST_ONE_MEMBER') {
+      return sendError(res, { statusCode: 400, messageKey: 'conversation.groupNeedMembers', message: 'Add at least one member' }, req)
+    }
+    if (error.message === 'GROUP_NEED_AT_LEAST_TWO_MEMBERS') {
+      return sendError(res, { statusCode: 400, messageKey: 'conversation.groupNeedTwoMembers', message: 'Select at least 2 members' }, req)
+    }
+    if (error.message === 'GROUP_EXCEED_MAX_MEMBERS') {
+      return sendError(res, { statusCode: 400, messageKey: 'conversation.groupExceedMaxMembers', message: 'Group has reached maximum members' }, req)
+    }
+    if (error.message === 'FORBIDDEN') {
+      return sendError(res, { statusCode: 403, messageKey: 'common.forbidden' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
  * GET /conversations => list my conversations
  */
 export const getMyConversations = async (req, res, next) => {
@@ -52,11 +82,14 @@ export const getUnreadTotal = async (req, res, next) => {
 }
 
 /**
- * GET /conversations/:id/messages => get messages of a conversation
+ * GET /conversations/:id/messages => get messages of a conversation (paginated)
+ * Query: limit (default 10), before (messageId cursor for loading older messages)
  */
 export const getMessages = async (req, res, next) => {
   try {
-    const messages = await conversationService.getMessages(req.params.id, req.userId)
+    const limit = req.query.limit != null ? parseInt(req.query.limit, 10) : 10
+    const before = req.query.before || null
+    const messages = await conversationService.getMessages(req.params.id, req.userId, { limit, before })
     return sendSuccess(res, { data: messages }, req)
   } catch (error) {
     if (error.message === 'CONVERSATION_NOT_FOUND') {
@@ -115,17 +148,19 @@ export const sendMessage = async (req, res, next) => {
       )
       attachments.push({ url, name: file.originalname || null, type: file.mimetype || null })
     }
-    const { message, otherParticipantId } = await conversationService.sendMessage(
+    const { message, otherParticipantIds } = await conversationService.sendMessage(
       req.params.id,
       req.userId,
       content.trim(),
       attachments
     )
     const io = req.app.get('io')
-    if (io && otherParticipantId) {
-      emitToUser(io, otherParticipantId, 'conversation:message', {
-        conversationId: req.params.id,
-        message,
+    if (io && Array.isArray(otherParticipantIds)) {
+      otherParticipantIds.forEach((userId) => {
+        emitToUser(io, userId, 'conversation:message', {
+          conversationId: req.params.id,
+          message,
+        })
       })
     }
     return sendSuccess(res, { statusCode: 201, data: message }, req)
@@ -195,18 +230,20 @@ export const reactToMessage = async (req, res, next) => {
     if (emoji == null || typeof emoji !== 'string') {
       return sendError(res, { statusCode: 400, messageKey: 'common.missingParam', message: 'Missing emoji' }, req)
     }
-    const { message, otherParticipantId } = await conversationService.reactToMessage(
+    const { message, otherParticipantIds } = await conversationService.reactToMessage(
       req.params.id,
       req.params.messageId,
       req.userId,
       emoji
     )
     const io = req.app.get('io')
-    if (io && otherParticipantId) {
-      emitToUser(io, otherParticipantId, 'conversation:messageReaction', {
-        conversationId: req.params.id,
-        messageId: req.params.messageId,
-        reactions: message.reactions,
+    if (io && Array.isArray(otherParticipantIds)) {
+      otherParticipantIds.forEach((userId) => {
+        emitToUser(io, userId, 'conversation:messageReaction', {
+          conversationId: req.params.id,
+          messageId: req.params.messageId,
+          reactions: message.reactions,
+        })
       })
     }
     return sendSuccess(res, { data: { messageId: req.params.messageId, reactions: message.reactions } }, req)
@@ -257,7 +294,7 @@ export const updateMessage = async (req, res, next) => {
     if (!hasContent) {
       return sendError(res, { statusCode: 400, messageKey: 'common.missingParam', message: 'Missing content or file' }, req)
     }
-    const { message, otherParticipantId } = await conversationService.updateMessage(
+    const { message, otherParticipantIds } = await conversationService.updateMessage(
       req.params.id,
       req.params.messageId,
       req.userId,
@@ -265,11 +302,13 @@ export const updateMessage = async (req, res, next) => {
       attachments
     )
     const io = req.app.get('io')
-    if (io && otherParticipantId) {
-      emitToUser(io, otherParticipantId, 'conversation:messageUpdated', {
-        conversationId: req.params.id,
-        messageId: req.params.messageId,
-        message,
+    if (io && Array.isArray(otherParticipantIds)) {
+      otherParticipantIds.forEach((userId) => {
+        emitToUser(io, userId, 'conversation:messageUpdated', {
+          conversationId: req.params.id,
+          messageId: req.params.messageId,
+          message,
+        })
       })
     }
     return sendSuccess(res, { data: message }, req)
@@ -298,11 +337,13 @@ export const updateMessage = async (req, res, next) => {
  */
 export const markAsRead = async (req, res, next) => {
   try {
-    const otherParticipantId = await conversationService.markConversationAsRead(req.params.id, req.userId)
+    const { otherParticipantIds } = await conversationService.markConversationAsRead(req.params.id, req.userId)
     const io = req.app.get('io')
-    if (io && otherParticipantId) {
-      emitToUser(io, otherParticipantId, 'conversation:read', {
-        conversationId: req.params.id,
+    if (io && Array.isArray(otherParticipantIds)) {
+      otherParticipantIds.forEach((userId) => {
+        emitToUser(io, userId, 'conversation:read', {
+          conversationId: req.params.id,
+        })
       })
     }
     return sendSuccess(res, {}, req)
@@ -344,6 +385,265 @@ export const updateConversationSettings = async (req, res, next) => {
 }
 
 /**
+ * PATCH /conversations/:id/group-settings => cập nhật thông tin nhóm (chỉ type group).
+ * Body: { name?, avatar?, maxMembers?, groupPermissions? }.
+ * Chỉ host đổi được maxMembers và groupPermissions; host hoặc admin (nếu có quyền) đổi name/avatar.
+ */
+export const updateGroupSettings = async (req, res, next) => {
+  try {
+    const { name, avatar, maxMembers, groupPermissions } = req.body || {}
+    const updated = await conversationService.updateGroupSettings(req.params.id, req.userId, {
+      ...(name !== undefined && { name }),
+      ...(avatar !== undefined && { avatar }),
+      ...(maxMembers !== undefined && { maxMembers }),
+      ...(groupPermissions !== undefined && { groupPermissions }),
+    })
+    const result = {
+      id: updated._id?.toString(),
+      name: updated.name ?? '',
+      avatar: updated.avatar ?? '',
+      maxMembers: updated.maxMembers ?? 50,
+      groupPermissions: updated.groupPermissions
+        ? {
+            adminCanKick: !!updated.groupPermissions.adminCanKick,
+            adminCanAddMembers: !!updated.groupPermissions.adminCanAddMembers,
+            adminCanEditGroupInfo: !!updated.groupPermissions.adminCanEditGroupInfo,
+            adminCanAssignUserPermissions: !!updated.groupPermissions.adminCanAssignUserPermissions,
+            adminCanBlockUser: updated.groupPermissions.adminCanBlockUser !== false,
+            userCanAddMembers: !!updated.groupPermissions.userCanAddMembers,
+            userCanEditGroupInfo: !!updated.groupPermissions.userCanEditGroupInfo,
+          }
+        : undefined,
+    }
+    return sendSuccess(res, { data: result }, req)
+  } catch (error) {
+    if (error.message === 'CONVERSATION_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'conversation.notFound' }, req)
+    }
+    if (error.message === 'FORBIDDEN') {
+      return sendError(res, { statusCode: 403, messageKey: 'common.forbidden' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * POST /conversations/:id/members => thêm thành viên vào nhóm (body: { userIds: string[] }). Chỉ host/admin có quyền thêm.
+ */
+export const addMembersToGroup = async (req, res, next) => {
+  try {
+    const userIds = req.body?.userIds
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return sendError(res, { statusCode: 400, messageKey: 'common.missingParam', message: 'Missing userIds array' }, req)
+    }
+    const result = await conversationService.addMembersToGroup(req.params.id, userIds, req.userId)
+    const io = req.app.get('io')
+    if (io) {
+      if (Array.isArray(result.addedUserIds)) {
+        result.addedUserIds.forEach((userId) => {
+          emitToUser(io, userId, 'conversation:membersAdded', {
+            conversationId: result.conversationId,
+          })
+        })
+      }
+      if (result.systemMessage && Array.isArray(result.participantIds) && result.participantIds.length) {
+        result.participantIds.forEach((uid) => {
+          emitToUser(io, uid, 'conversation:message', {
+            conversationId: result.conversationId,
+            message: result.systemMessage,
+          })
+        })
+      }
+    }
+    const { systemMessage: _sm, ...dataToSend } = result
+    return sendSuccess(res, { data: dataToSend }, req)
+  } catch (error) {
+    if (error.message === 'CONVERSATION_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'conversation.notFound' }, req)
+    }
+    if (error.message === 'FORBIDDEN') {
+      return sendError(res, { statusCode: 403, messageKey: 'common.forbidden' }, req)
+    }
+    if (error.message === 'NO_VALID_MEMBERS_TO_ADD') {
+      return sendError(res, { statusCode: 400, messageKey: 'conversation.noValidMembersToAdd' }, req)
+    }
+    if (error.message === 'GROUP_EXCEED_MAX_MEMBERS') {
+      return sendError(res, { statusCode: 400, messageKey: 'conversation.groupExceedMaxMembers' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * PATCH /conversations/:id/members/:userId/role => đặt role thành viên (body: { role: 'admin' | 'user' }). Chỉ host mới được gọi.
+ */
+export const setMemberRole = async (req, res, next) => {
+  try {
+    const role = req.body?.role
+    if (!role || (role !== 'admin' && role !== 'user')) {
+      return sendError(res, { statusCode: 400, messageKey: 'common.missingParam', message: 'role must be "admin" or "user"' }, req)
+    }
+    const result = await conversationService.setMemberRoleInGroup(
+      req.params.id,
+      req.params.userId,
+      role,
+      req.userId
+    )
+    const io = req.app.get('io')
+    if (io && Array.isArray(result.participantIds) && result.participantIds.length) {
+      result.participantIds.forEach((uid) => {
+        emitToUser(io, uid, 'conversation:memberRoleChanged', {
+          conversationId: result.conversationId,
+          userId: result.userId,
+          role: result.role,
+        })
+      })
+      if (result.systemMessage) {
+        result.participantIds.forEach((uid) => {
+          emitToUser(io, uid, 'conversation:message', {
+            conversationId: result.conversationId,
+            message: result.systemMessage,
+          })
+        })
+      }
+    }
+    const { systemMessage: _sm, ...dataToSend } = result
+    return sendSuccess(res, { data: dataToSend }, req)
+  } catch (error) {
+    if (error.message === 'CONVERSATION_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'conversation.notFound' }, req)
+    }
+    if (error.message === 'FORBIDDEN') {
+      return sendError(res, { statusCode: 403, messageKey: 'common.forbidden' }, req)
+    }
+    if (error.message === 'USER_NOT_IN_GROUP') {
+      return sendError(res, { statusCode: 400, messageKey: 'conversation.userNotInGroup' }, req)
+    }
+    if (error.message === 'CANNOT_CHANGE_HOST_ROLE') {
+      return sendError(res, { statusCode: 400, messageKey: 'conversation.cannotChangeHostRole' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * POST /conversations/:id/block => chặn thành viên khỏi nhóm (body: { userId }). Chỉ host/admin có quyền kick.
+ */
+export const blockUserInGroup = async (req, res, next) => {
+  try {
+    const targetUserId = req.body?.userId
+    if (!targetUserId) {
+      return sendError(res, { statusCode: 400, messageKey: 'common.missingParam', message: 'Missing userId' }, req)
+    }
+    const result = await conversationService.blockUserInGroup(req.params.id, targetUserId, req.userId)
+    const io = req.app.get('io')
+    if (io && result.blockedUserId) {
+      emitToUser(io, result.blockedUserId, 'conversation:memberBlocked', {
+        conversationId: result.conversationId,
+      })
+    }
+    return sendSuccess(res, { data: result }, req)
+  } catch (error) {
+    if (error.message === 'CONVERSATION_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'conversation.notFound' }, req)
+    }
+    if (error.message === 'FORBIDDEN') {
+      return sendError(res, { statusCode: 403, messageKey: 'common.forbidden' }, req)
+    }
+    if (error.message === 'USER_NOT_IN_GROUP') {
+      return sendError(res, { statusCode: 400, messageKey: 'conversation.userNotInGroup' }, req)
+    }
+    if (error.message === 'CANNOT_BLOCK_HOST') {
+      return sendError(res, { statusCode: 400, messageKey: 'conversation.cannotBlockHost' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * POST /conversations/:id/disband => giải tán nhóm. Chỉ host mới được gọi.
+ */
+export const disbandGroup = async (req, res, next) => {
+  try {
+    const result = await conversationService.disbandGroup(req.params.id, req.userId)
+    const io = req.app.get('io')
+    if (io && Array.isArray(result.participantIds)) {
+      result.participantIds.forEach((uid) => {
+        emitToUser(io, uid, 'conversation:disbanded', { conversationId: result.conversationId })
+      })
+    }
+    return sendSuccess(res, { data: result }, req)
+  } catch (error) {
+    if (error.message === 'CONVERSATION_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'conversation.notFound' }, req)
+    }
+    if (error.message === 'FORBIDDEN') {
+      return sendError(res, { statusCode: 403, messageKey: 'common.forbidden' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * POST /conversations/:id/leave => rời nhóm. Mọi thành viên đều được gọi.
+ */
+export const leaveGroup = async (req, res, next) => {
+  try {
+    const result = await conversationService.leaveGroup(req.params.id, req.userId)
+    const io = req.app.get('io')
+    if (io) {
+      emitToUser(io, result.leftUserId, 'conversation:left', { conversationId: result.conversationId, disbanded: result.disbanded || false })
+      if (Array.isArray(result.participantIds) && result.participantIds.length) {
+        const memberLeftPayload = {
+          conversationId: result.conversationId,
+          userId: result.leftUserId,
+          userName: result.leftUserName,
+        }
+        result.participantIds.forEach((uid) => {
+          emitToUser(io, uid, 'conversation:memberLeft', memberLeftPayload)
+        })
+        if (result.systemMessage) {
+          result.participantIds.forEach((uid) => {
+            emitToUser(io, uid, 'conversation:message', {
+              conversationId: result.conversationId,
+              message: result.systemMessage,
+            })
+          })
+        }
+      }
+    }
+    const { systemMessage: _sm, ...dataToSend } = result
+    return sendSuccess(res, { data: dataToSend }, req)
+  } catch (error) {
+    if (error.message === 'CONVERSATION_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'conversation.notFound' }, req)
+    }
+    if (error.message === 'FORBIDDEN') {
+      return sendError(res, { statusCode: 403, messageKey: 'common.forbidden' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * DELETE /conversations/:id/block/:userId => bỏ chặn thành viên. Chỉ host/admin có quyền kick.
+ */
+export const unblockUserInGroup = async (req, res, next) => {
+  try {
+    const result = await conversationService.unblockUserInGroup(req.params.id, req.params.userId, req.userId)
+    return sendSuccess(res, { data: result }, req)
+  } catch (error) {
+    if (error.message === 'CONVERSATION_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'conversation.notFound' }, req)
+    }
+    if (error.message === 'FORBIDDEN') {
+      return sendError(res, { statusCode: 403, messageKey: 'common.forbidden' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
  * DELETE /conversations/:id/messages/:messageId => xóa mềm (body: { scope: 'me' | 'everyone' })
  */
 export const deleteMessage = async (req, res, next) => {
@@ -352,10 +652,12 @@ export const deleteMessage = async (req, res, next) => {
     if (scope === 'everyone') {
       const result = await conversationService.deleteMessageForEveryone(req.params.id, req.params.messageId, req.userId)
       const io = req.app.get('io')
-      if (io && result.otherParticipantId) {
-        emitToUser(io, result.otherParticipantId, 'conversation:messageDeleted', {
-          conversationId: req.params.id,
-          messageId: req.params.messageId,
+      if (io && Array.isArray(result.otherParticipantIds)) {
+        result.otherParticipantIds.forEach((userId) => {
+          emitToUser(io, userId, 'conversation:messageDeleted', {
+            conversationId: req.params.id,
+            messageId: req.params.messageId,
+          })
         })
       }
       return sendSuccess(res, { data: { deleted: true } }, req)

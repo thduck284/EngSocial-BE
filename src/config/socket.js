@@ -1,4 +1,6 @@
+import mongoose from 'mongoose'
 import { verifyToken } from '../utils/jwt.js'
+import { Conversation } from '../models/index.js'
 
 const corsOrigin = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
@@ -28,6 +30,13 @@ export function unregisterSocket(socketId) {
   }
 }
 
+export function isUserOnline(userId) {
+  const id = userId?.toString?.() || userId
+  if (!id) return false
+  const set = userSockets.get(id)
+  return !!(set && set.size > 0)
+}
+
 export function emitToUser(io, userId, event, data) {
   if (!io) return
   const id = userId?.toString?.() || userId
@@ -50,12 +59,45 @@ export function setupSocket(io) {
     }
   })
 
+  /** Lấy danh sách otherUserId (bạn chat trực tiếp) để báo online/offline */
+  async function getConversationPartnerIds(userId) {
+    if (!userId) return []
+    const id = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : null
+    if (!id) return []
+    const list = await Conversation.find({
+      type: 'direct',
+      participants: id,
+    })
+      .select('participants')
+      .lean()
+    const partnerIds = []
+    const myStr = id.toString()
+    for (const c of list) {
+      const other = (c.participants || []).find((p) => p.toString() !== myStr)
+      if (other) partnerIds.push(other.toString())
+    }
+    return partnerIds
+  }
+
   io.on('connection', (socket) => {
     if (socket.userId) {
       registerUserSocket(socket.userId, socket.id)
+      getConversationPartnerIds(socket.userId).then((partnerIds) => {
+        partnerIds.forEach((partnerId) => {
+          emitToUser(io, partnerId, 'conversation:userOnline', { userId: socket.userId })
+        })
+      }).catch(() => {})
     }
     socket.on('disconnect', () => {
+      const userId = socket.userId
       unregisterSocket(socket.id)
+      if (userId) {
+        getConversationPartnerIds(userId).then((partnerIds) => {
+          partnerIds.forEach((partnerId) => {
+            emitToUser(io, partnerId, 'conversation:userOffline', { userId })
+          })
+        }).catch(() => {})
+      }
     })
   })
 }

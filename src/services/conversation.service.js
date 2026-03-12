@@ -1,4 +1,5 @@
 import mongoose from 'mongoose'
+import { isUserOnline } from '../config/socket.js'
 import { Conversation, MessageBucket, ConversationSetting, Message, User } from '../models/index.js'
 
 /**
@@ -12,8 +13,9 @@ export const getOrCreateConversation = async (myId, otherUserId) => {
   if (!myIdObj || !otherId) throw new Error('USER_NOT_FOUND')
   if (myIdObj.equals(otherId)) throw new Error('CANNOT_CHAT_SELF')
 
-  const other = await User.findById(otherId).select('name avatar').lean()
+  const other = await User.findById(otherId).select('name avatar lastActiveDate').lean()
   if (!other) throw new Error('USER_NOT_FOUND')
+  const otherIdStr = otherId.toString()
 
   const participants = [myIdObj, otherId].sort((a, b) => a.toString().localeCompare(b.toString()))
   let conversation = await Conversation.findOne({
@@ -45,6 +47,7 @@ export const getOrCreateConversation = async (myId, otherUserId) => {
     id: other._id.toString(),
     name: other.name || 'User',
     avatar: other.avatar || null,
+    lastActiveDate: other.lastActiveDate ?? null,
   }
 
   const setting = await ConversationSetting.findOne({
@@ -71,6 +74,7 @@ export const getOrCreateConversation = async (myId, otherUserId) => {
       disappearingUntil: setting?.disappearingUntil ?? null,
     },
     otherUser,
+    online: isUserOnline(otherIdStr),
     messages: messages.map((m) => ({
       id: m._id.toString(),
       senderId: m.senderId.toString(),
@@ -83,19 +87,83 @@ export const getOrCreateConversation = async (myId, otherUserId) => {
   }
 }
 
+const GROUP_MAX_MEMBERS_DEFAULT = 50
+
+/**
+ * Tạo hội thoại nhóm. participantIds = danh sách userId (bạn bè), không bao gồm chính mình.
+ * Role: người tạo = host, thành viên thêm = user.
+ * @returns { conversationId, name, avatar, participants, participantRoles }
+ */
+export const createGroupConversation = async (myId, { name, avatar, participantIds }) => {
+  const myIdObj = mongoose.Types.ObjectId.isValid(myId) ? new mongoose.Types.ObjectId(myId) : null
+  if (!myIdObj) throw new Error('FORBIDDEN')
+  const raw = (participantIds && Array.isArray(participantIds) ? participantIds : [])
+    .filter(Boolean)
+    .map((id) => (mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null))
+    .filter(Boolean)
+  const unique = [...new Set([myIdObj.toString(), ...raw.map((id) => id.toString())])]
+  const participants = unique.map((id) => new mongoose.Types.ObjectId(id))
+  const displayName = (name && String(name).trim()) || 'Nhóm chat'
+  if (participants.length < 3) throw new Error('GROUP_NEED_AT_LEAST_TWO_MEMBERS')
+
+  const maxMembers = Math.min(Math.max(2, GROUP_MAX_MEMBERS_DEFAULT), 256)
+  if (participants.length > maxMembers) throw new Error('GROUP_EXCEED_MAX_MEMBERS')
+
+  const participantRoles = [
+    { userId: myIdObj, role: 'host' },
+    ...participants
+      .filter((p) => !p.equals(myIdObj))
+      .map((p) => ({ userId: p, role: 'user' })),
+  ]
+  const created = await Conversation.create({
+    type: 'group',
+    name: displayName,
+    avatar: (avatar && String(avatar).trim()) || '',
+    maxMembers,
+    participants,
+    participantRoles,
+  })
+
+  const otherParticipantIds = participants.filter((p) => !p.equals(myIdObj))
+  const users = await User.find({ _id: { $in: [myIdObj, ...otherParticipantIds] } }).select('name').lean()
+  const creator = users.find((u) => u._id.toString() === myIdObj.toString())
+  const creatorName = creator?.name?.trim() || 'Thành viên'
+  const otherNames = users
+    .filter((u) => u._id.toString() !== myIdObj.toString())
+    .map((u) => (u?.name || 'User').trim())
+  let systemContent
+  if (otherNames.length <= 3) {
+    systemContent = `${creatorName} đã thêm ${otherNames.join(', ')} vào nhóm.`
+  } else {
+    systemContent = `${creatorName} đã thêm ${otherNames.slice(0, 3).join(', ')}, ... xem thêm vào nhóm.`
+  }
+
+  await Message.create({
+    conversationId: created._id,
+    senderId: myIdObj,
+    content: systemContent,
+    messageType: 'system',
+    readBy: participants,
+  })
+
+  return {
+    conversationId: created._id.toString(),
+    name: created.name,
+    avatar: created.avatar || null,
+    participants: participants.map((p) => p.toString()),
+    participantRoles: participantRoles.map((r) => ({ userId: r.userId.toString(), role: r.role })),
+  }
+}
+
 /**
  * Get list of conversations for current user (with last message and other participant for direct).
- * Nếu user vừa offline >= 5p thì chạy xóa thật tin nhắn tự xóa hết hạn.
+ * Bao gồm cả direct và group.
  */
 export const getMyConversations = async (userId) => {
   await ensureUserAccessedAndRunDisappearingCleanup(userId)
   const userIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : null
   if (!userIdObj) return []
-  const list = await Conversation.find({
-    participants: userIdObj,
-    type: 'direct',
-  })
-    .lean()
+  const list = await Conversation.find({ participants: userIdObj }).lean()
 
   const settingsMap = new Map()
   const bucketMap = new Map()
@@ -126,8 +194,6 @@ export const getMyConversations = async (userId) => {
 
   const result = await Promise.all(
     list.map(async (c) => {
-      const otherId = c.participants.find((p) => p.toString() !== userIdObj.toString())
-      const other = await User.findById(otherId).select('name avatar').lean()
       const bucket = bucketMap.get(c._id.toString()) || { deletedUpToCreatedAt: null, deletedMessageIds: [] }
       const visibleFilter = {
         $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
@@ -147,17 +213,90 @@ export const getMyConversations = async (userId) => {
         .sort({ createdAt: -1 })
         .lean()
       const lastMessageFromMe = lastMsg ? lastMsg.senderId.toString() === userIdObj.toString() : false
-      const lastMessageSeen = lastMsg && lastMessageFromMe && (lastMsg.readBy || []).some((r) => r.toString() === otherId?.toString())
-      // Last message theo từng user: chỉ lấy tin cuối trong số tin còn hiển thị với user này (sau khi xóa cho tôi / xóa toàn bộ cho tôi).
       const lastMessageText = lastMsg
         ? (lastMsg.content?.trim?.()?.slice(0, 200) || (lastMsg.attachments?.length ? `[${lastMsg.attachments.length} file]` : '') || '')
         : ''
       const lastMessageAtUser = lastMsg?.createdAt ?? null
+
+      if (c.type === 'group') {
+        const allParticipantIds = (c.participants || []).map((p) => p.toString())
+        const otherParticipantIds = allParticipantIds.filter((id) => id !== userIdObj.toString())
+        const others = await User.find({ _id: { $in: c.participants } }).select('name avatar lastActiveDate').lean()
+        const participantNames = others.map((u) => u?.name || 'User').slice(0, 3)
+        const lastActiveDates = others.map((u) => u?.lastActiveDate).filter(Boolean)
+        const groupLastActiveDate = lastActiveDates.length ? new Date(Math.max(...lastActiveDates.map((d) => new Date(d).getTime()))) : null
+        const roles = (c.participantRoles || []).map((r) => ({ userId: r.userId?.toString(), role: r.role || 'user' }))
+        const myRoleEntry = roles.find((r) => r.userId === userIdObj.toString())
+        const myRole = myRoleEntry?.role || 'user'
+        const roleOrder = { host: 0, admin: 1, user: 2 }
+        const members = others
+          .map((u) => {
+            const uid = u._id.toString()
+            const roleEntry = roles.find((r) => r.userId === uid)
+            return { userId: uid, name: u?.name || 'User', avatar: u?.avatar || null, role: roleEntry?.role || 'user' }
+          })
+          .sort((a, b) => (roleOrder[a.role] ?? 3) - (roleOrder[b.role] ?? 3))
+        const groupPermissions = c.groupPermissions
+          ? {
+              adminCanKick: !!c.groupPermissions.adminCanKick,
+              adminCanAddMembers: !!c.groupPermissions.adminCanAddMembers,
+              adminCanEditGroupInfo: !!c.groupPermissions.adminCanEditGroupInfo,
+              adminCanAssignUserPermissions: !!c.groupPermissions.adminCanAssignUserPermissions,
+              adminCanBlockUser: c.groupPermissions.adminCanBlockUser !== false,
+              userCanAddMembers: !!c.groupPermissions.userCanAddMembers,
+              userCanEditGroupInfo: !!c.groupPermissions.userCanEditGroupInfo,
+            }
+          : {
+              adminCanKick: true,
+              adminCanAddMembers: true,
+              adminCanEditGroupInfo: false,
+              adminCanAssignUserPermissions: false,
+              adminCanBlockUser: true,
+              userCanAddMembers: false,
+              userCanEditGroupInfo: false,
+            }
+        const blockedIds = (c.blockedUserIds || []).map((b) => b.toString?.() ?? b)
+        const blockedUsers = blockedIds.length > 0 ? await User.find({ _id: { $in: c.blockedUserIds } }).select('name avatar').lean() : []
+        const blockedMembers = blockedUsers.map((u) => ({ userId: u._id.toString(), name: u?.name || 'User', avatar: u?.avatar || null }))
+        const hasOnlineMember = otherParticipantIds.some((id) => isUserOnline(id))
+        return {
+          id: c._id.toString(),
+          otherUserId: null,
+          name: (c.name && c.name.trim()) || participantNames.join(', ') || 'Nhóm',
+          avatar: (c.avatar && c.avatar.trim()) || null,
+          isGroup: true,
+          myRole,
+          participantRoles: roles,
+          members,
+          blockedMembers,
+          maxMembers: c.maxMembers ?? GROUP_MAX_MEMBERS_DEFAULT,
+          memberCount: (c.participants || []).length,
+          groupPermissions,
+          lastMessage: lastMessageText,
+          lastMessageAt: lastMessageAtUser,
+          unread: unreadCount > 0,
+          unreadCount,
+          lastMessageFromMe,
+          lastMessageSeen: false,
+          muted: settingsMap.get(c._id.toString())?.muted ?? false,
+          mutedUntil: settingsMap.get(c._id.toString())?.mutedUntil ?? null,
+          disappearing: settingsMap.get(c._id.toString())?.disappearing ?? false,
+          disappearingUntil: settingsMap.get(c._id.toString())?.disappearingUntil ?? null,
+          online: hasOnlineMember,
+          lastActiveDate: groupLastActiveDate,
+        }
+      }
+
+      const otherId = c.participants.find((p) => p.toString() !== userIdObj.toString())
+      const otherIdStr = otherId?.toString()
+      const other = await User.findById(otherId).select('name avatar lastActiveDate').lean()
+      const lastMessageSeen = lastMsg && lastMessageFromMe && (lastMsg.readBy || []).some((r) => r.toString() === otherId?.toString())
       return {
         id: c._id.toString(),
-        otherUserId: otherId?.toString(),
+        otherUserId: otherIdStr,
         name: other?.name || 'User',
         avatar: other?.avatar || null,
+        isGroup: false,
         lastMessage: lastMessageText,
         lastMessageAt: lastMessageAtUser,
         unread: unreadCount > 0,
@@ -168,6 +307,8 @@ export const getMyConversations = async (userId) => {
         mutedUntil: settingsMap.get(c._id.toString())?.mutedUntil ?? null,
         disappearing: settingsMap.get(c._id.toString())?.disappearing ?? false,
         disappearingUntil: settingsMap.get(c._id.toString())?.disappearingUntil ?? null,
+        online: isUserOnline(otherIdStr),
+        lastActiveDate: other?.lastActiveDate ?? null,
       }
     })
   )
@@ -201,12 +342,17 @@ async function getBucket(conversationId, userId) {
   }
 }
 
+const DEFAULT_MESSAGES_LIMIT = 10
+
 /**
- * Get messages for a conversation. Ensure user is a participant.
+ * Get messages for a conversation with pagination. Ensure user is a participant.
  * Respects bucket: excludes messages with createdAt <= deletedUpToCreatedAt or in deletedMessageIds.
- * Nếu user vừa offline >= 5p thì chạy xóa thật tin nhắn tự xóa hết hạn.
+ * @param {string} conversationId
+ * @param {string} userId
+ * @param {{ limit?: number, before?: string }} [opts] - limit (default 10), before = messageId cursor (load older than this)
+ * @returns messages in chronological order (oldest first). If no `before`, returns latest `limit` messages. If `before`, returns up to `limit` messages older than that message.
  */
-export const getMessages = async (conversationId, userId) => {
+export const getMessages = async (conversationId, userId, opts = {}) => {
   await ensureUserAccessedAndRunDisappearingCleanup(userId)
   const conv = await Conversation.findById(conversationId).lean()
   if (!conv) throw new Error('CONVERSATION_NOT_FOUND')
@@ -214,23 +360,35 @@ export const getMessages = async (conversationId, userId) => {
   const isParticipant = conv.participants.some((p) => p.toString() === userIdStr)
   if (!isParticipant) throw new Error('FORBIDDEN')
 
-  const notDeletedForEveryone = { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] }
-  const messages = await Message.find({ conversationId, ...notDeletedForEveryone }).sort({ createdAt: 1 }).lean()
+  const limit = Math.min(Math.max(1, opts.limit || DEFAULT_MESSAGES_LIMIT), 50)
+  const beforeId = opts.before || null
+
   const bucket = await getBucket(conversationId, userId)
   const cutoff = bucket.deletedUpToCreatedAt ? new Date(bucket.deletedUpToCreatedAt) : null
-  const deletedSet = new Set(bucket.deletedMessageIds || [])
+  const deletedIds = (bucket.deletedMessageIds || []).filter(Boolean).map((id) => (mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id))
 
-  const visible = messages.filter((m) => {
-    if (deletedSet.has(m._id.toString())) return false
-    if (cutoff && m.createdAt <= cutoff) return false
-    return true
-  })
+  const notDeletedForEveryone = { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] }
+  const baseFilter = {
+    conversationId,
+    ...notDeletedForEveryone,
+    ...(deletedIds.length > 0 && { _id: { $nin: deletedIds } }),
+    ...(cutoff && { createdAt: { $gt: cutoff } }),
+  }
 
-  return visible.map((m) => ({
+  let query = Message.find(baseFilter)
+  if (beforeId && mongoose.Types.ObjectId.isValid(beforeId)) {
+    const beforeDoc = await Message.findOne({ _id: beforeId, conversationId }).select('createdAt').lean()
+    if (beforeDoc) query = query.where('createdAt').lt(beforeDoc.createdAt)
+  }
+  const messages = await query.sort({ createdAt: -1 }).limit(limit).lean()
+  const chronological = messages.reverse()
+
+  return chronological.map((m) => ({
     id: m._id.toString(),
     senderId: m.senderId.toString(),
     content: m.content,
     createdAt: m.createdAt,
+    messageType: m.messageType || 'user',
     readBy: (m.readBy || []).map((id) => id.toString()),
     attachments: normalizeAttachments(m),
     reactions: (m.reactions || []).map((r) => ({ userId: r.userId?.toString(), emoji: r.emoji })),
@@ -277,7 +435,10 @@ export const sendMessage = async (conversationId, senderId, content, attachments
   })
   if (!msg) throw new Error('MESSAGE_CREATE_FAILED')
 
-  const otherId = conv.participants.find((p) => p.toString() !== senderIdStr)?.toString() || null
+  const otherParticipantIds = conv.participants
+    .filter((p) => p.toString() !== senderIdStr)
+    .map((p) => p.toString())
+  const otherParticipantId = conv.type === 'direct' ? otherParticipantIds[0] || null : null
 
   const msgObj = {
     id: msg._id.toString(),
@@ -289,7 +450,7 @@ export const sendMessage = async (conversationId, senderId, content, attachments
     reactions: (msg.reactions || []).map((r) => ({ userId: r.userId?.toString(), emoji: r.emoji })),
   }
   await updateUserLastAccessed(senderId)
-  return { message: msgObj, otherParticipantId: otherId }
+  return { message: msgObj, otherParticipantId, otherParticipantIds }
 }
 
 /**
@@ -340,7 +501,10 @@ export const updateMessage = async (conversationId, messageId, userId, content, 
     reactions: (updated.reactions || []).map((r) => ({ userId: r.userId?.toString(), emoji: r.emoji })),
   }
   await updateUserLastAccessed(userId)
-  return { message: msgObj, otherParticipantId: otherId?.toString() || null }
+  const otherParticipantIds = conv.participants
+    .filter((p) => p.toString() !== userIdStr)
+    .map((p) => p.toString())
+  return { message: msgObj, otherParticipantId: otherParticipantIds[0] || null, otherParticipantIds }
 }
 
 /**
@@ -353,15 +517,17 @@ export const markConversationAsRead = async (conversationId, userId) => {
   const isParticipant = conv.participants.some((p) => p.toString() === userIdStr)
   if (!isParticipant) throw new Error('FORBIDDEN')
   const userIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : null
-  if (!userIdObj) return null
+  if (!userIdObj) return { otherParticipantIds: [] }
 
   await Message.updateMany(
     { conversationId, readBy: { $nin: [userIdObj] } },
     { $addToSet: { readBy: userIdObj } }
   )
   await updateUserLastAccessed(userId)
-  const otherId = conv.participants.find((p) => p.toString() !== userIdStr)?.toString() || null
-  return otherId
+  const otherParticipantIds = conv.participants
+    .filter((p) => p.toString() !== userIdStr)
+    .map((p) => p.toString())
+  return { otherParticipantIds }
 }
 
 const ALLOWED_REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
@@ -402,17 +568,20 @@ export const reactToMessage = async (conversationId, messageId, userId, emoji) =
     { $set: { reactions: nextReactions.map((r) => ({ userId: new mongoose.Types.ObjectId(r.userId), emoji: r.emoji })) } }
   )
 
-  const otherId = conv.participants.find((p) => p.toString() !== userIdStr)?.toString() || null
-  return { message: { id: messageId, reactions: nextReactions }, otherParticipantId: otherId }
+  const otherParticipantIds = conv.participants
+    .filter((p) => p.toString() !== userIdStr)
+    .map((p) => p.toString())
+  return { message: { id: messageId, reactions: nextReactions }, otherParticipantId: otherParticipantIds[0] || null, otherParticipantIds }
 }
 
 const FAR_FUTURE_MS = 10 * 365 * 24 * 60 * 60 * 1000 // ~10 years
 
-/** Cập nhật lastAccessedAt cho user (gọi khi có request conversation). */
+/** Cập nhật lastAccessedAt và lastActiveDate cho user (gọi khi có request conversation). lastActiveDate dùng để hiển thị "Hoạt động x phút trước". */
 export const updateUserLastAccessed = async (userId) => {
   const userIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : null
   if (!userIdObj) return
-  await User.updateOne({ _id: userIdObj }, { $set: { lastAccessedAt: new Date() } })
+  const now = new Date()
+  await User.updateOne({ _id: userIdObj }, { $set: { lastAccessedAt: now, lastActiveDate: now } })
 }
 
 /**
@@ -502,6 +671,381 @@ export const updateSettings = async (conversationId, userId, { mutedUntil, disap
 }
 
 /**
+ * Cập nhật thông tin nhóm (name, avatar, maxMembers, groupPermissions).
+ * Chỉ host mới được đổi maxMembers và groupPermissions.
+ * Host hoặc admin (nếu adminCanEditGroupInfo) được đổi name, avatar.
+ */
+export const updateGroupSettings = async (conversationId, userId, payload) => {
+  const conv = await Conversation.findById(conversationId).lean()
+  if (!conv) throw new Error('CONVERSATION_NOT_FOUND')
+  if (conv.type !== 'group') throw new Error('FORBIDDEN')
+  const userIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : null
+  if (!userIdObj) throw new Error('FORBIDDEN')
+  const isParticipant = conv.participants.some((p) => p.toString() === userIdObj.toString())
+  if (!isParticipant) throw new Error('FORBIDDEN')
+
+  const roles = (conv.participantRoles || []).map((r) => ({ userId: r.userId?.toString(), role: r.role || 'user' }))
+  const myRole = roles.find((r) => r.userId === userIdObj.toString())?.role || 'user'
+  const currentPerms = conv.groupPermissions || {}
+  const canEditNameAvatar = myRole === 'host' || (myRole === 'admin' && currentPerms.adminCanEditGroupInfo) || (myRole === 'user' && currentPerms.userCanEditGroupInfo)
+  const canEditMaxMembers = myRole === 'host'
+  const canEditPermissionsOrMax = myRole === 'host'
+  const canEditUserPermissionsOnly = myRole === 'admin' && currentPerms.adminCanAssignUserPermissions
+
+  const update = {}
+  if (payload.name !== undefined && canEditNameAvatar) {
+    update.name = typeof payload.name === 'string' ? payload.name.trim() : ''
+  }
+  if (payload.avatar !== undefined && canEditNameAvatar) {
+    update.avatar = payload.avatar == null || payload.avatar === '' ? '' : String(payload.avatar).trim()
+  }
+  if (payload.maxMembers !== undefined && (canEditPermissionsOrMax || canEditMaxMembers)) {
+    const val = Number(payload.maxMembers)
+    if (val >= 2 && val <= GROUP_MAX_MEMBERS_DEFAULT) {
+      const currentCount = (conv.participants || []).length
+      if (val >= currentCount) update.maxMembers = val
+    }
+  }
+  if (payload.groupPermissions !== undefined && typeof payload.groupPermissions === 'object') {
+    const p = payload.groupPermissions
+    if (canEditPermissionsOrMax) {
+      update.groupPermissions = {
+        adminCanKick: p.adminCanKick === true,
+        adminCanAddMembers: p.adminCanAddMembers === true,
+        adminCanEditGroupInfo: p.adminCanEditGroupInfo === true,
+        adminCanAssignUserPermissions: p.adminCanAssignUserPermissions === true,
+        adminCanBlockUser: p.adminCanBlockUser !== false,
+        userCanAddMembers: p.userCanAddMembers === true,
+        userCanEditGroupInfo: p.userCanEditGroupInfo === true,
+      }
+    } else if (canEditUserPermissionsOnly) {
+      const existing = conv.groupPermissions || {}
+      update.groupPermissions = {
+        adminCanKick: existing.adminCanKick === true,
+        adminCanAddMembers: existing.adminCanAddMembers === true,
+        adminCanEditGroupInfo: existing.adminCanEditGroupInfo === true,
+        adminCanAssignUserPermissions: existing.adminCanAssignUserPermissions === true,
+        adminCanBlockUser: existing.adminCanBlockUser !== false,
+        userCanAddMembers: p.userCanAddMembers === true,
+        userCanEditGroupInfo: p.userCanEditGroupInfo === true,
+      }
+    }
+  }
+
+  if (Object.keys(update).length === 0) {
+    return conv
+  }
+  const updated = await Conversation.findByIdAndUpdate(conversationId, { $set: update }, { new: true }).lean()
+  return updated
+}
+
+/**
+ * Thêm thành viên vào nhóm. Chỉ host hoặc admin (có adminCanAddMembers) mới được gọi.
+ * @param {string} conversationId
+ * @param {string[]} userIds - danh sách userId cần thêm (bạn bè, không trùng thành viên hiện tại, không nằm trong blockedUserIds)
+ * @returns { conversationId, addedCount, addedUserIds }
+ */
+export const addMembersToGroup = async (conversationId, userIds, requestedByUserId) => {
+  const conv = await Conversation.findById(conversationId).lean()
+  if (!conv) throw new Error('CONVERSATION_NOT_FOUND')
+  if (conv.type !== 'group') throw new Error('FORBIDDEN')
+  const requestedByObj = mongoose.Types.ObjectId.isValid(requestedByUserId) ? new mongoose.Types.ObjectId(requestedByUserId) : null
+  if (!requestedByObj) throw new Error('FORBIDDEN')
+  const isParticipant = conv.participants.some((p) => p.toString() === requestedByObj.toString())
+  if (!isParticipant) throw new Error('FORBIDDEN')
+  const roles = (conv.participantRoles || []).map((r) => ({ userId: r.userId?.toString(), role: r.role || 'user' }))
+  const myRole = roles.find((r) => r.userId === requestedByObj.toString())?.role || 'user'
+  const perms = conv.groupPermissions || {}
+  const canAdd = myRole === 'host' || (myRole === 'admin' && perms.adminCanAddMembers)
+  if (!canAdd) throw new Error('FORBIDDEN')
+
+  const currentParticipantIds = new Set((conv.participants || []).map((p) => p.toString()))
+  const maxMembers = conv.maxMembers ?? GROUP_MAX_MEMBERS_DEFAULT
+  const toAdd = (Array.isArray(userIds) ? userIds : [])
+    .map((id) => (mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null))
+    .filter((id) => id && !currentParticipantIds.has(id.toString()))
+  const uniqueToAdd = [...new Set(toAdd.map((id) => id.toString()))].map((id) => new mongoose.Types.ObjectId(id))
+  if (uniqueToAdd.length === 0) throw new Error('NO_VALID_MEMBERS_TO_ADD')
+  if (currentParticipantIds.size + uniqueToAdd.length > maxMembers) {
+    throw new Error('GROUP_EXCEED_MAX_MEMBERS')
+  }
+
+  const newParticipants = [...conv.participants, ...uniqueToAdd]
+  const newRoles = [...(conv.participantRoles || [])]
+  uniqueToAdd.forEach((uid) => {
+    if (!newRoles.some((r) => r.userId.toString() === uid.toString())) {
+      newRoles.push({ userId: uid, role: 'user' })
+    }
+  })
+  const addedIdsSet = new Set(uniqueToAdd.map((id) => id.toString()))
+  const newBlockedUserIds = (conv.blockedUserIds || []).filter((b) => !addedIdsSet.has(b.toString()))
+
+  await Conversation.findByIdAndUpdate(conversationId, {
+    $set: {
+      participants: newParticipants,
+      participantRoles: newRoles,
+      blockedUserIds: newBlockedUserIds,
+    },
+  })
+  const addedUserIds = uniqueToAdd.map((id) => id.toString())
+
+  const users = await User.find({ _id: { $in: [requestedByObj, ...uniqueToAdd] } })
+    .select('name')
+    .lean()
+  const requester = users.find((u) => u._id.toString() === requestedByObj.toString())
+  const requesterName = (requester?.name || '').trim() || 'Thành viên'
+  const addedNames = uniqueToAdd
+    .map((uid) => {
+      const u = users.find((x) => x._id.toString() === uid.toString())
+      return (u?.name || 'User').trim()
+    })
+    .filter(Boolean)
+  let systemContent
+  if (addedNames.length <= 3) {
+    systemContent = `${requesterName} đã thêm ${addedNames.join(', ')} vào nhóm.`
+  } else {
+    systemContent = `${requesterName} đã thêm ${addedNames.slice(0, 3).join(', ')}, ... xem thêm vào nhóm.`
+  }
+
+  const systemMsgDoc = await Message.create({
+    conversationId: conv._id,
+    senderId: requestedByObj,
+    content: systemContent,
+    messageType: 'system',
+    readBy: newParticipants,
+  })
+  const systemMessage = {
+    id: systemMsgDoc._id.toString(),
+    senderId: systemMsgDoc.senderId.toString(),
+    content: systemMsgDoc.content,
+    messageType: 'system',
+    createdAt: systemMsgDoc.createdAt,
+    readBy: (systemMsgDoc.readBy || []).map((id) => id.toString()),
+    attachments: [],
+    reactions: [],
+  }
+
+  const participantIds = newParticipants.map((p) => p.toString())
+  return {
+    conversationId,
+    addedCount: addedUserIds.length,
+    addedUserIds,
+    participantIds,
+    systemMessage,
+  }
+}
+
+/**
+ * Đặt role thành viên trong nhóm (admin | user). Chỉ host mới được gọi.
+ * Không được đổi role của host.
+ * @returns { conversationId, userId, role }
+ */
+export const setMemberRoleInGroup = async (conversationId, targetUserId, role, requestedByUserId) => {
+  const conv = await Conversation.findById(conversationId).lean()
+  if (!conv) throw new Error('CONVERSATION_NOT_FOUND')
+  if (conv.type !== 'group') throw new Error('FORBIDDEN')
+  const requestedByObj = mongoose.Types.ObjectId.isValid(requestedByUserId) ? new mongoose.Types.ObjectId(requestedByUserId) : null
+  const targetObj = mongoose.Types.ObjectId.isValid(targetUserId) ? new mongoose.Types.ObjectId(targetUserId) : null
+  if (!requestedByObj || !targetObj) throw new Error('FORBIDDEN')
+  const roles = (conv.participantRoles || []).map((r) => ({ userId: r.userId?.toString(), role: r.role || 'user' }))
+  const myRole = roles.find((r) => r.userId === requestedByObj.toString())?.role || 'user'
+  if (myRole !== 'host') throw new Error('FORBIDDEN')
+  const targetInParticipants = conv.participants.some((p) => p.toString() === targetObj.toString())
+  if (!targetInParticipants) throw new Error('USER_NOT_IN_GROUP')
+  const newRole = role === 'admin' ? 'admin' : 'user'
+  const hostEntry = (conv.participantRoles || []).find((r) => r.role === 'host')
+  if (hostEntry && hostEntry.userId.toString() === targetObj.toString()) throw new Error('CANNOT_CHANGE_HOST_ROLE')
+
+  const newRoles = (conv.participantRoles || []).map((r) => {
+    if (r.userId.toString() !== targetObj.toString()) return r
+    return { userId: r.userId, role: newRole }
+  })
+
+  await Conversation.findByIdAndUpdate(conversationId, { $set: { participantRoles: newRoles } })
+  const participantIds = (conv.participants || []).map((p) => p.toString())
+
+  const users = await User.find({ _id: { $in: [requestedByObj, targetObj] } }).select('name').lean()
+  const hostName = (users.find((u) => u._id.toString() === requestedByObj.toString())?.name || '').trim() || 'Chủ nhóm'
+  const targetName = (users.find((u) => u._id.toString() === targetObj.toString())?.name || '').trim() || 'Thành viên'
+  const systemContent =
+    newRole === 'admin'
+      ? `${hostName} đã đặt ${targetName} làm quản trị viên.`
+      : `${hostName} đã gỡ quyền quản trị viên của ${targetName}.`
+
+  const systemMsgDoc = await Message.create({
+    conversationId: conv._id,
+    senderId: requestedByObj,
+    content: systemContent,
+    messageType: 'system',
+    readBy: conv.participants,
+  })
+  const systemMessage = {
+    id: systemMsgDoc._id.toString(),
+    senderId: systemMsgDoc.senderId.toString(),
+    content: systemMsgDoc.content,
+    messageType: 'system',
+    createdAt: systemMsgDoc.createdAt,
+    readBy: (systemMsgDoc.readBy || []).map((id) => id.toString()),
+    attachments: [],
+    reactions: [],
+  }
+
+  return { conversationId, userId: targetUserId, role: newRole, participantIds, systemMessage }
+}
+
+/**
+ * Chặn thành viên khỏi nhóm: xóa khỏi participants và participantRoles, thêm vào blockedUserIds.
+ * Chỉ host hoặc admin (có adminCanBlockUser hoặc adminCanKick) mới được gọi.
+ */
+export const blockUserInGroup = async (conversationId, targetUserId, requestedByUserId) => {
+  const conv = await Conversation.findById(conversationId).lean()
+  if (!conv) throw new Error('CONVERSATION_NOT_FOUND')
+  if (conv.type !== 'group') throw new Error('FORBIDDEN')
+  const requestedByObj = mongoose.Types.ObjectId.isValid(requestedByUserId) ? new mongoose.Types.ObjectId(requestedByUserId) : null
+  const targetObj = mongoose.Types.ObjectId.isValid(targetUserId) ? new mongoose.Types.ObjectId(targetUserId) : null
+  if (!requestedByObj || !targetObj) throw new Error('FORBIDDEN')
+  const isParticipant = conv.participants.some((p) => p.toString() === requestedByObj.toString())
+  if (!isParticipant) throw new Error('FORBIDDEN')
+  const roles = (conv.participantRoles || []).map((r) => ({ userId: r.userId?.toString(), role: r.role || 'user' }))
+  const myRole = roles.find((r) => r.userId === requestedByObj.toString())?.role || 'user'
+  const perms = conv.groupPermissions || {}
+  const canBlock = myRole === 'host' || (myRole === 'admin' && perms.adminCanBlockUser !== false)
+  if (!canBlock) throw new Error('FORBIDDEN')
+  const targetInParticipants = conv.participants.some((p) => p.toString() === targetObj.toString())
+  if (!targetInParticipants) throw new Error('USER_NOT_IN_GROUP')
+  const hostEntry = (conv.participantRoles || []).find((r) => r.role === 'host')
+  if (hostEntry && hostEntry.userId.toString() === targetObj.toString()) throw new Error('CANNOT_BLOCK_HOST')
+
+  const newParticipants = conv.participants.filter((p) => !p.equals(targetObj))
+  const newRoles = (conv.participantRoles || []).filter((r) => !r.userId.equals(targetObj))
+  const blockedList = (conv.blockedUserIds || []).slice()
+  if (!blockedList.some((b) => b.toString() === targetObj.toString())) blockedList.push(targetObj)
+
+  await Conversation.findByIdAndUpdate(conversationId, {
+    $set: {
+      participants: newParticipants,
+      participantRoles: newRoles,
+      blockedUserIds: blockedList,
+    },
+  })
+  return { conversationId, blockedUserId: targetUserId }
+}
+
+/**
+ * Bỏ chặn thành viên: xóa khỏi blockedUserIds (không tự thêm lại vào nhóm).
+ * Chỉ host hoặc admin (có adminCanBlockUser hoặc adminCanKick) mới được gọi.
+ */
+export const unblockUserInGroup = async (conversationId, targetUserId, requestedByUserId) => {
+  const conv = await Conversation.findById(conversationId).lean()
+  if (!conv) throw new Error('CONVERSATION_NOT_FOUND')
+  if (conv.type !== 'group') throw new Error('FORBIDDEN')
+  const requestedByObj = mongoose.Types.ObjectId.isValid(requestedByUserId) ? new mongoose.Types.ObjectId(requestedByUserId) : null
+  const targetObj = mongoose.Types.ObjectId.isValid(targetUserId) ? new mongoose.Types.ObjectId(targetUserId) : null
+  if (!requestedByObj || !targetObj) throw new Error('FORBIDDEN')
+  const isParticipant = conv.participants.some((p) => p.toString() === requestedByObj.toString())
+  if (!isParticipant) throw new Error('FORBIDDEN')
+  const roles = (conv.participantRoles || []).map((r) => ({ userId: r.userId?.toString(), role: r.role || 'user' }))
+  const myRole = roles.find((r) => r.userId === requestedByObj.toString())?.role || 'user'
+  const perms = conv.groupPermissions || {}
+  const canUnblock = myRole === 'host' || (myRole === 'admin' && perms.adminCanBlockUser !== false)
+  if (!canUnblock) throw new Error('FORBIDDEN')
+
+  const blockedList = (conv.blockedUserIds || []).filter((b) => b.toString() !== targetObj.toString())
+  await Conversation.findByIdAndUpdate(conversationId, { $set: { blockedUserIds: blockedList } })
+  return { conversationId, unblockedUserId: targetUserId }
+}
+
+/**
+ * Giải tán nhóm: chỉ host mới được gọi. Xóa conversation (nhóm sẽ biến mất khỏi danh sách của tất cả thành viên).
+ * @returns { conversationId, participantIds } để emit socket cho từng user.
+ */
+export const disbandGroup = async (conversationId, userId) => {
+  const conv = await Conversation.findById(conversationId).lean()
+  if (!conv) throw new Error('CONVERSATION_NOT_FOUND')
+  if (conv.type !== 'group') throw new Error('FORBIDDEN')
+  const userIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : null
+  if (!userIdObj) throw new Error('FORBIDDEN')
+  const roles = (conv.participantRoles || []).map((r) => ({ userId: r.userId?.toString(), role: r.role || 'user' }))
+  const myRole = roles.find((r) => r.userId === userIdObj.toString())?.role || 'user'
+  if (myRole !== 'host') throw new Error('FORBIDDEN')
+
+  const participantIds = (conv.participants || []).map((p) => p.toString())
+  await Conversation.findByIdAndDelete(conversationId)
+  return { conversationId, participantIds }
+}
+
+/**
+ * Rời nhóm: mọi thành viên đều được gọi. Xóa user khỏi participants và participantRoles.
+ * Nếu user là host thì chuyển quyền host cho admin đầu tiên hoặc thành viên đầu tiên.
+ * Nếu không còn ai thì xóa conversation (giải tán).
+ * @returns { conversationId, leftUserId, participantIds?, disbanded? }
+ */
+export const leaveGroup = async (conversationId, userId) => {
+  const conv = await Conversation.findById(conversationId).lean()
+  if (!conv) throw new Error('CONVERSATION_NOT_FOUND')
+  if (conv.type !== 'group') throw new Error('FORBIDDEN')
+  const userIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : null
+  if (!userIdObj) throw new Error('FORBIDDEN')
+  const isParticipant = conv.participants.some((p) => p.toString() === userIdObj.toString())
+  if (!isParticipant) throw new Error('FORBIDDEN')
+
+  const newParticipants = conv.participants.filter((p) => !p.equals(userIdObj))
+  let newRoles = (conv.participantRoles || []).filter((r) => !r.userId.equals(userIdObj))
+  const wasHost = (conv.participantRoles || []).some((r) => r.userId.equals(userIdObj) && r.role === 'host')
+
+  if (newParticipants.length === 0) {
+    await Conversation.findByIdAndDelete(conversationId)
+    return { conversationId, leftUserId: userId, disbanded: true, participantIds: [] }
+  }
+
+  if (wasHost) {
+    const nextHost = newRoles.find((r) => r.role === 'admin') || newRoles[0]
+    if (nextHost) {
+      const nextHostIdStr = nextHost.userId?.toString?.() || nextHost.userId
+      newRoles = newRoles.map((r) => ({
+        userId: r.userId,
+        role: (r.userId?.toString?.() || r.userId) === nextHostIdStr ? 'host' : r.role,
+      }))
+    }
+  }
+
+  await Conversation.findByIdAndUpdate(conversationId, {
+    $set: { participants: newParticipants, participantRoles: newRoles },
+  })
+  const participantIds = newParticipants.map((p) => p.toString())
+
+  const leftUser = await User.findById(userIdObj).select('name').lean()
+  const leftUserName = (leftUser?.name || '').trim() || 'Thành viên'
+  const systemContent = `${leftUserName} đã rời khỏi nhóm`
+  const systemMsgDoc = await Message.create({
+    conversationId: conv._id,
+    senderId: userIdObj,
+    content: systemContent,
+    messageType: 'system',
+    readBy: newParticipants,
+  })
+
+  const systemMessage = {
+    id: systemMsgDoc._id.toString(),
+    senderId: systemMsgDoc.senderId.toString(),
+    content: systemMsgDoc.content,
+    messageType: 'system',
+    createdAt: systemMsgDoc.createdAt,
+    readBy: (systemMsgDoc.readBy || []).map((id) => id.toString()),
+    attachments: [],
+    reactions: [],
+  }
+
+  return {
+    conversationId,
+    leftUserId: userId,
+    leftUserName,
+    participantIds,
+    systemMessage,
+  }
+}
+
+/**
  * Single delete for me: add messageId to bucket.deletedMessageIds (same for own or others' messages).
  * "Xóa với tôi" chỉ dùng MessageBucket, không ghi vào Message.
  */
@@ -571,6 +1115,8 @@ export const deleteMessageForEveryone = async (conversationId, messageId, userId
     { _id: messageId, conversationId: conv._id },
     { $set: { deletedAt: new Date() } }
   )
-  const otherId = conv.participants.find((p) => p.toString() !== userIdStr)?.toString() || null
-  return { deleted: true, otherParticipantId: otherId }
+  const otherParticipantIds = conv.participants
+    .filter((p) => p.toString() !== userIdStr)
+    .map((p) => p.toString())
+  return { deleted: true, otherParticipantId: otherParticipantIds[0] || null, otherParticipantIds }
 }

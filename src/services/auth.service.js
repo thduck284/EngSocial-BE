@@ -125,10 +125,15 @@ export const refreshAccessToken = async (refreshToken) => {
 }
 
 /**
- * Logout user (invalidate refresh token)
+ * Logout user (invalidate refresh token). Cập nhật lastActiveDate để "Hoạt động x phút trước" đúng.
  */
 export const logout = async (refreshToken) => {
+  const tokenDoc = await RefreshToken.findOne({ token: refreshToken }).select('userId').lean()
   await RefreshToken.deleteOne({ token: refreshToken })
+  if (tokenDoc?.userId) {
+    const now = new Date()
+    await User.updateOne({ _id: tokenDoc.userId }, { $set: { lastAccessedAt: now, lastActiveDate: now } })
+  }
   return true
 }
 

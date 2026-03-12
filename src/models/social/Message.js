@@ -16,6 +16,8 @@ const messageSchema = new mongoose.Schema({
     default: '',
     trim: true,
   },
+  /** 'user' = tin thường, 'system' = tin hệ thống (vd: "X đã thêm A, B vào nhóm") */
+  messageType: { type: String, enum: ['user', 'system'], default: 'user' },
   attachments: [{
     url: { type: String, required: true },
     name: { type: String, default: null },
