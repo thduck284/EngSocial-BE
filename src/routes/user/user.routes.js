@@ -48,4 +48,7 @@ router.post('/avatar', auth, (req, res, next) => {
   })
 }, userController.uploadAvatar)
 
+router.post('/block/:userId', auth, userController.blockUser)
+router.delete('/block/:userId', auth, userController.unblockUser)
+
 export default router

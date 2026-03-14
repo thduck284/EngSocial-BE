@@ -107,3 +107,30 @@ export const getChallengeLeaderboard = async (req, res, next) => {
     next(error)
   }
 }
+
+export const updateChallenge = async (req, res, next) => {
+  try {
+    const challenge = await challengeService.updateChallenge(req.params.id, req.body)
+    return sendSuccess(res, {
+      messageKey: 'challenge.updateSuccess',
+      data: { challenge },
+    }, req)
+  } catch (error) {
+    if (error.message === 'CHALLENGE_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'challenge.notFound' }, req)
+    }
+    next(error)
+  }
+}
+
+export const deleteChallenge = async (req, res, next) => {
+  try {
+    await challengeService.deleteChallenge(req.params.id)
+    return sendSuccess(res, { messageKey: 'challenge.deleteSuccess' }, req)
+  } catch (error) {
+    if (error.message === 'CHALLENGE_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'challenge.notFound' }, req)
+    }
+    next(error)
+  }
+}

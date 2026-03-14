@@ -39,6 +39,29 @@ export const createChallenge = async (data) => {
 }
 
 /**
+ * Update challenge (admin)
+ */
+export const updateChallenge = async (challengeId, data) => {
+  const challenge = await Challenge.findByIdAndUpdate(
+    challengeId,
+    { $set: data },
+    { new: true, runValidators: true }
+  )
+  if (!challenge) throw new Error('CHALLENGE_NOT_FOUND')
+  return new ChallengeDTO(challenge)
+}
+
+/**
+ * Delete challenge (admin)
+ */
+export const deleteChallenge = async (challengeId) => {
+  const challenge = await Challenge.findByIdAndDelete(challengeId)
+  if (!challenge) throw new Error('CHALLENGE_NOT_FOUND')
+  await ChallengeParticipant.deleteMany({ challengeId })
+  return true
+}
+
+/**
  * Join a challenge
  */
 export const joinChallenge = async (userId, challengeId) => {

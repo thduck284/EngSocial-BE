@@ -14,6 +14,7 @@
     "db:seed:lessons-page": "node database/seed-lessons.js",
     "db:seed:writing": "node database/seed-writing-lessons.js",
     "db:seed:quests": "node database/seed-quests-node.js",
+    "db:seed:challenges": "node database/seed-challenges.js",
     "db:seed:all": "node database/seed.js"
   },
   "keywords": [

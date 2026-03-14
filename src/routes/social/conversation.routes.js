@@ -9,6 +9,7 @@ const router = Router()
 router.get('/', auth, conversationController.getMyConversations)
 router.post('/', auth, conversationController.createConversation)
 router.get('/unread-total', auth, conversationController.getUnreadTotal)
+router.get('/for-forward', auth, conversationController.getConversationsForForward)
 router.get('/with', auth, conversationController.getOrCreateWithUser) // /conversations/with?with=userId
 router.get('/attachment-download', auth, conversationController.downloadMessageAttachment)
 router.get('/:id/messages', auth, conversationController.getMessages)

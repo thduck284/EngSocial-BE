@@ -58,12 +58,27 @@ export const createConversation = async (req, res, next) => {
 }
 
 /**
- * GET /conversations => list my conversations
+ * GET /conversations => list my conversations (optional ?q= for search by name)
  */
 export const getMyConversations = async (req, res, next) => {
   try {
-    const list = await conversationService.getMyConversations(req.userId)
+    const q = req.query?.q
+    const list = await conversationService.getMyConversations(req.userId, q != null && q !== '' ? { q } : {})
     return sendSuccess(res, { data: list }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * GET /conversations/for-forward => list conversations that have messages, paginated (limit=5, offset=0)
+ */
+export const getConversationsForForward = async (req, res, next) => {
+  try {
+    const limit = Math.min(50, Math.max(1, parseInt(req.query?.limit, 10) || 5))
+    const offset = Math.max(0, parseInt(req.query?.offset, 10) || 0)
+    const result = await conversationService.getMyConversations(req.userId, { forForward: true, limit, offset })
+    return sendSuccess(res, { data: result.data, total: result.total, hasMore: result.hasMore }, req)
   } catch (error) {
     next(error)
   }
@@ -170,6 +185,9 @@ export const sendMessage = async (req, res, next) => {
     }
     if (error.message === 'FORBIDDEN') {
       return sendError(res, { statusCode: 403, messageKey: 'common.forbidden' }, req)
+    }
+    if (error.message === 'BLOCKED_BY_ME') {
+      return sendError(res, { statusCode: 403, messageKey: 'conversation.youBlockedThisUser' }, req)
     }
     if (error.message === 'MESSAGE_CONTENT_REQUIRED') {
       return sendError(res, { statusCode: 400, messageKey: 'common.missingParam', message: 'Content or file required' }, req)
@@ -340,9 +358,11 @@ export const markAsRead = async (req, res, next) => {
     const { otherParticipantIds } = await conversationService.markConversationAsRead(req.params.id, req.userId)
     const io = req.app.get('io')
     if (io && Array.isArray(otherParticipantIds)) {
+      const readerUserId = req.userId?.toString?.() || req.userId
       otherParticipantIds.forEach((userId) => {
         emitToUser(io, userId, 'conversation:read', {
           conversationId: req.params.id,
+          userId: readerUserId,
         })
       })
     }
@@ -631,7 +651,17 @@ export const leaveGroup = async (req, res, next) => {
 export const unblockUserInGroup = async (req, res, next) => {
   try {
     const result = await conversationService.unblockUserInGroup(req.params.id, req.params.userId, req.userId)
-    return sendSuccess(res, { data: result }, req)
+    const io = req.app.get('io')
+    if (io && Array.isArray(result.participantIds) && result.participantIds.length) {
+      result.participantIds.forEach((uid) => {
+        emitToUser(io, uid, 'conversation:memberUnblocked', {
+          conversationId: result.conversationId,
+          unblockedUserId: result.unblockedUserId,
+        })
+      })
+    }
+    const { participantIds: _p, ...dataToSend } = result
+    return sendSuccess(res, { data: dataToSend }, req)
   } catch (error) {
     if (error.message === 'CONVERSATION_NOT_FOUND') {
       return sendError(res, { statusCode: 404, messageKey: 'conversation.notFound' }, req)

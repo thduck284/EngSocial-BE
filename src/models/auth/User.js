@@ -121,6 +121,8 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  /** Danh sách user bị mình chặn (chat 1-1: không nhận tin từ họ, họ vẫn thấy mình đã chặn) */
+  blockedUserIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 }, {
   timestamps: true,
 })

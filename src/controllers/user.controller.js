@@ -2,6 +2,7 @@ import * as authService from '../services/auth.service.js'
 import * as userService from '../services/user.service.js'
 import * as uploadService from '../services/upload.service.js'
 import { sendSuccess, sendError } from '../dto/index.js'
+import { emitToUser } from '../config/socket.js'
 
 /**
  * Get current user profile
@@ -78,6 +79,55 @@ export const getPublicProfile = async (req, res, next) => {
         statusCode: 404,
         messageKey: 'auth.userNotFound',
       }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Chặn user (chat 1-1)
+ * POST /api/user/block/:userId
+ */
+export const blockUser = async (req, res, next) => {
+  try {
+    await userService.blockUser(req.userId, req.params.userId)
+    const io = req.app.get('io')
+    const blockerId = req.userId
+    const blockedUserId = req.params.userId
+    if (io) {
+      emitToUser(io, blockerId, 'user:blocked', { blockerId, blockedUserId })
+      emitToUser(io, blockedUserId, 'user:blocked', { blockerId, blockedUserId })
+    }
+    return sendSuccess(res, { data: { blocked: true } }, req)
+  } catch (error) {
+    if (error.message === 'USER_NOT_FOUND' || error.message === 'TARGET_USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    if (error.message === 'CANNOT_BLOCK_SELF') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.cannotBlockSelf' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Bỏ chặn user
+ * DELETE /api/user/block/:userId
+ */
+export const unblockUser = async (req, res, next) => {
+  try {
+    await userService.unblockUser(req.userId, req.params.userId)
+    const io = req.app.get('io')
+    const blockerId = req.userId
+    const unblockedUserId = req.params.userId
+    if (io) {
+      emitToUser(io, blockerId, 'user:unblocked', { blockerId, unblockedUserId })
+      emitToUser(io, unblockedUserId, 'user:unblocked', { blockerId, unblockedUserId })
+    }
+    return sendSuccess(res, { data: { unblocked: true } }, req)
+  } catch (error) {
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
     }
     next(error)
   }

@@ -159,10 +159,10 @@ export const createGroupConversation = async (myId, { name, avatar, participantI
  * Get list of conversations for current user (with last message and other participant for direct).
  * Bao gồm cả direct và group.
  */
-export const getMyConversations = async (userId) => {
+export const getMyConversations = async (userId, options = {}) => {
   await ensureUserAccessedAndRunDisappearingCleanup(userId)
   const userIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : null
-  if (!userIdObj) return []
+  if (!userIdObj) return options.forForward ? { data: [], total: 0, hasMore: false } : []
   const list = await Conversation.find({ participants: userIdObj }).lean()
 
   const settingsMap = new Map()
@@ -190,6 +190,12 @@ export const getMyConversations = async (userId) => {
         deletedMessageIds: b.deletedMessageIds || [],
       })
     })
+  }
+
+  let blockedSet = new Set()
+  const me = await User.findById(userIdObj).select('blockedUserIds').lean()
+  if (me?.blockedUserIds?.length) {
+    blockedSet = new Set(me.blockedUserIds.map((b) => b.toString()))
   }
 
   const result = await Promise.all(
@@ -289,7 +295,8 @@ export const getMyConversations = async (userId) => {
 
       const otherId = c.participants.find((p) => p.toString() !== userIdObj.toString())
       const otherIdStr = otherId?.toString()
-      const other = await User.findById(otherId).select('name avatar lastActiveDate').lean()
+      const other = await User.findById(otherId).select('name avatar lastActiveDate blockedUserIds').lean()
+      const theyBlockedMe = (other?.blockedUserIds || []).some((b) => b.toString() === userIdObj.toString())
       const lastMessageSeen = lastMsg && lastMessageFromMe && (lastMsg.readBy || []).some((r) => r.toString() === otherId?.toString())
       return {
         id: c._id.toString(),
@@ -297,6 +304,8 @@ export const getMyConversations = async (userId) => {
         name: other?.name || 'User',
         avatar: other?.avatar || null,
         isGroup: false,
+        iBlockedThem: blockedSet.has(otherIdStr),
+        theyBlockedMe,
         lastMessage: lastMessageText,
         lastMessageAt: lastMessageAtUser,
         unread: unreadCount > 0,
@@ -313,6 +322,22 @@ export const getMyConversations = async (userId) => {
     })
   )
   result.sort((a, b) => (new Date(b.lastMessageAt) || 0) - (new Date(a.lastMessageAt) || 0))
+  const q = (options.q || '').trim().toLowerCase()
+  if (q) {
+    const filtered = result.filter((c) => (c.name || '').toLowerCase().includes(q))
+    if (options.forForward) {
+      return { data: filtered, total: filtered.length, hasMore: false }
+    }
+    return filtered
+  }
+  if (options.forForward) {
+    const withMessages = result.filter((c) => c.lastMessageAt != null)
+    const total = withMessages.length
+    const offset = Math.max(0, parseInt(options.offset, 10) || 0)
+    const limit = Math.min(50, Math.max(1, parseInt(options.limit, 10) || 5))
+    const data = withMessages.slice(offset, offset + limit)
+    return { data, total, hasMore: offset + data.length < total }
+  }
   return result
 }
 
@@ -415,6 +440,14 @@ export const sendMessage = async (conversationId, senderId, content, attachments
   const senderIdStr = typeof senderId === 'string' ? senderId : senderId?.toString?.()
   const isParticipant = conv.participants.some((p) => p.toString() === senderIdStr)
   if (!isParticipant) throw new Error('FORBIDDEN')
+  if (conv.type === 'direct') {
+    const otherId = conv.participants.find((p) => p.toString() !== senderIdStr)?.toString()
+    if (otherId) {
+      const me = await User.findById(senderId).select('blockedUserIds').lean()
+      const blockedSet = new Set((me?.blockedUserIds || []).map((b) => b.toString()))
+      if (blockedSet.has(otherId)) throw new Error('BLOCKED_BY_ME')
+    }
+  }
 
   const text = (content || '').trim()
   const hasAttachments = Array.isArray(attachments) && attachments.length > 0
@@ -700,10 +733,12 @@ export const updateGroupSettings = async (conversationId, userId, payload) => {
     update.avatar = payload.avatar == null || payload.avatar === '' ? '' : String(payload.avatar).trim()
   }
   if (payload.maxMembers !== undefined && (canEditPermissionsOrMax || canEditMaxMembers)) {
-    const val = Number(payload.maxMembers)
-    if (val >= 2 && val <= GROUP_MAX_MEMBERS_DEFAULT) {
+    const val = Math.floor(Number(payload.maxMembers))
+    if (!Number.isNaN(val) && val >= 2 && val <= GROUP_MAX_MEMBERS_DEFAULT) {
       const currentCount = (conv.participants || []).length
-      if (val >= currentCount) update.maxMembers = val
+      if (val >= currentCount) {
+        update.maxMembers = val
+      }
     }
   }
   if (payload.groupPermissions !== undefined && typeof payload.groupPermissions === 'object') {
@@ -952,7 +987,8 @@ export const unblockUserInGroup = async (conversationId, targetUserId, requested
 
   const blockedList = (conv.blockedUserIds || []).filter((b) => b.toString() !== targetObj.toString())
   await Conversation.findByIdAndUpdate(conversationId, { $set: { blockedUserIds: blockedList } })
-  return { conversationId, unblockedUserId: targetUserId }
+  const participantIds = (conv.participants || []).map((p) => p.toString())
+  return { conversationId, unblockedUserId: targetUserId, participantIds }
 }
 
 /**

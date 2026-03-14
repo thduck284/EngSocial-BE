@@ -102,3 +102,33 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
     friends,
   }
 }
+
+/**
+ * Chặn user (chat 1-1): thêm targetUserId vào blockedUserIds của current user.
+ * Không thể chặn chính mình.
+ */
+export const blockUser = async (currentUserId, targetUserId) => {
+  if (currentUserId === targetUserId) throw new Error('CANNOT_BLOCK_SELF')
+  const currentObj = await User.findById(currentUserId).select('blockedUserIds').lean()
+  if (!currentObj) throw new Error('USER_NOT_FOUND')
+  const targetObj = await User.findById(targetUserId).select('_id').lean()
+  if (!targetObj) throw new Error('TARGET_USER_NOT_FOUND')
+  const blocked = (currentObj.blockedUserIds || []).map((b) => b.toString())
+  if (blocked.includes(targetUserId)) return { blocked: true }
+  await User.findByIdAndUpdate(currentUserId, {
+    $addToSet: { blockedUserIds: targetObj._id },
+  })
+  return { blocked: true }
+}
+
+/**
+ * Bỏ chặn user: xóa targetUserId khỏi blockedUserIds của current user.
+ */
+export const unblockUser = async (currentUserId, targetUserId) => {
+  const currentObj = await User.findById(currentUserId).select('blockedUserIds').lean()
+  if (!currentObj) throw new Error('USER_NOT_FOUND')
+  await User.findByIdAndUpdate(currentUserId, {
+    $pull: { blockedUserIds: targetUserId },
+  })
+  return { unblocked: true }
+}
