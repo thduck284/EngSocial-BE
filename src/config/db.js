@@ -8,8 +8,9 @@ const connectDB = async () => {
   if (connectPromise) return connectPromise
   connectPromise = mongoose.connect(process.env.MONGODB_URI, {
     dbName: process.env.DB_NAME || 'engsocial',
-    serverSelectionTimeoutMS: 15000,
+    serverSelectionTimeoutMS: 20000,
     maxPoolSize: 10,
+    bufferCommands: false,
   })
   try {
     const conn = await connectPromise

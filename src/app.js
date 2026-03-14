@@ -8,7 +8,6 @@ import { ensureConnected } from './config/db.js'
 const app = express()
 
 app.use(async (req, res, next) => {
-  if (!req.path.startsWith('/api')) return next()
   try {
     await ensureConnected()
     next()
