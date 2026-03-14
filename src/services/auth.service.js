@@ -1,4 +1,5 @@
 import crypto from 'crypto'
+import mongoose from 'mongoose'
 import { User, RefreshToken, PasswordResetToken } from '../models/index.js'
 import { hashPassword, comparePassword, generateTokenPair } from '../utils/index.js'
 import { UserDTO, AuthResponseDTO, RefreshTokenResponseDTO } from '../dto/index.js'
@@ -58,8 +59,10 @@ export const register = async ({ email, password, name, gender, dateOfBirth }) =
  * Login user
  */
 export const login = async ({ email, password }) => {
-  // Find user by email (include password field)
+  const DEBUG_DB = process.env.DEBUG_DB === '1' || process.env.NODE_ENV !== 'production'
+  if (DEBUG_DB) console.log('[Auth] login: before User.findOne, readyState=', mongoose.connection.readyState)
   const user = await User.findOne({ email }).select('+password')
+  if (DEBUG_DB) console.log('[Auth] login: after User.findOne')
   
   if (!user) {
     throw new Error('INVALID_CREDENTIALS')

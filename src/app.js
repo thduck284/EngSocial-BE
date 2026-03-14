@@ -8,9 +8,12 @@ import { ensureConnected } from './config/db.js'
 
 const app = express()
 
+const DEBUG_DB = process.env.DEBUG_DB === '1' || process.env.NODE_ENV !== 'production'
 app.use(async (req, res, next) => {
   try {
+    if (DEBUG_DB) console.log('[API] before ensureConnected', req.method, req.path)
     await ensureConnected()
+    if (DEBUG_DB) console.log('[API] after ensureConnected, calling next()')
     next()
   } catch (err) {
     next(err)
