@@ -18,6 +18,7 @@ const passwordResetTokenSchema = new mongoose.Schema({
   },
 }, {
   timestamps: true,
+  bufferCommands: true,
 })
 
 passwordResetTokenSchema.index({ userId: 1 })

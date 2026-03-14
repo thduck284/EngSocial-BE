@@ -18,6 +18,7 @@ const refreshTokenSchema = new mongoose.Schema({
   },
 }, {
   timestamps: true,
+  bufferCommands: true,
 })
 
 refreshTokenSchema.index({ userId: 1 })

@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
+    "build": "echo 'No build step'",
     "dev": "node --watch src/server.js",
     "db:schema": "mongosh \"$MONGODB_URI\" < database/mongodb-schema.js",
     "db:seed": "mongosh \"$MONGODB_URI\" < database/seed-data.js",

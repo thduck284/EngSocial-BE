@@ -1,3 +1,4 @@
+import '../config/db.js'
 export * from './auth/index.js'
 export * from './learning/index.js'
 export * from './gamification/index.js'

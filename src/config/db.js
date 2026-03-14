@@ -2,6 +2,8 @@ import mongoose from 'mongoose'
 
 // Must run before any model/query; required for serverless (cold start).
 mongoose.set('bufferCommands', true)
+// Default bufferTimeoutMS is 10000; serverless cold start + Atlas can be slow.
+mongoose.set('bufferTimeoutMS', 60000)
 
 const DEBUG_DB = process.env.DEBUG_DB === '1' || process.env.NODE_ENV !== 'production'
 const log = (...args) => DEBUG_DB && console.log('[DB]', ...args)
@@ -20,10 +22,11 @@ const connectDB = async () => {
   log('connectDB: starting...')
   connectPromise = mongoose.connect(process.env.MONGODB_URI, {
     dbName: process.env.DB_NAME || 'engsocial',
-    serverSelectionTimeoutMS: 20000,
+    serverSelectionTimeoutMS: 30000,
+    connectTimeoutMS: 15000,
     maxPoolSize: 10,
     bufferCommands: true,
-    bufferTimeoutMS: 30000,
+    bufferTimeoutMS: 60000,
   })
   try {
     const conn = await connectPromise

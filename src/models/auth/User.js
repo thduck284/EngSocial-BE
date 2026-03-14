@@ -125,6 +125,7 @@ const userSchema = new mongoose.Schema({
   blockedUserIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 }, {
   timestamps: true,
+  bufferCommands: true,
 })
 
 // Indexes (email đã có unique: true trong schema)
