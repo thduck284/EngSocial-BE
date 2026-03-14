@@ -49,6 +49,21 @@ export const errorHandler = (err, req, res, next) => {
     }, req)
   }
 
+  // Mongoose connection / buffer timeout (Atlas IP, network, or cold start)
+  const isDbConnectionError =
+    err.message && (
+      /buffering timed out|before initial connection|ECONNREFUSED|ENOTFOUND|connection refused|MongoNetworkError/i.test(err.message) ||
+      err.name === 'MongoServerSelectionError' ||
+      err.name === 'MongoNetworkError'
+    )
+  if (isDbConnectionError) {
+    return sendError(res, {
+      statusCode: 503,
+      message: 'Database connection failed. Check Atlas Network Access (allow 0.0.0.0/0) and MONGODB_URI.',
+      errors: process.env.NODE_ENV === 'development' ? { raw: err.message } : null,
+    }, req)
+  }
+
   // JWT errors
   if (err.name === 'JsonWebTokenError') {
     return sendError(res, {

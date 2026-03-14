@@ -15,9 +15,14 @@ const connectDB = async () => {
     log('connectDB: no MONGODB_URI')
     return
   }
-  if (connectPromise) {
-    log('connectDB: reusing promise, readyState=', mongoose.connection.readyState)
+  if (connectPromise && mongoose.connection.readyState === 1) {
+    log('connectDB: reusing existing connection')
     return connectPromise
+  }
+  if (connectPromise && mongoose.connection.readyState !== 1) {
+    log('connectDB: previous connection dead, reconnecting, readyState=', mongoose.connection.readyState)
+    connectPromise = null
+    try { await mongoose.connection.close() } catch {}
   }
   log('connectDB: starting...')
   connectPromise = mongoose.connect(process.env.MONGODB_URI, {
