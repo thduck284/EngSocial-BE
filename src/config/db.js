@@ -49,7 +49,10 @@ export async function ensureConnected() {
     log('ensureConnected: no MONGODB_URI, skip')
     return
   }
-  await connectDB()
+  const result = await connectDB()
+  if (result === undefined) {
+    throw new Error('connectDB returned without connecting (MONGODB_URI may be empty at runtime)')
+  }
   if (mongoose.connection.readyState !== 1) {
     log('ensureConnected: readyState not 1, reconnecting...', mongoose.connection.readyState)
     connectPromise = null
@@ -57,6 +60,9 @@ export async function ensureConnected() {
       await mongoose.connection.close()
     } catch {}
     await connectDB()
+  }
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error(`DB not connected after ensureConnected (readyState=${mongoose.connection.readyState})`)
   }
   log('ensureConnected: done, readyState=', mongoose.connection.readyState)
 }

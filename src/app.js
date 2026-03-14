@@ -14,7 +14,7 @@ const app = express()
 const DEBUG_DB = process.env.DEBUG_DB === '1' || process.env.NODE_ENV !== 'production'
 
 // Routes that do not require DB (so we can return 503 for others when MONGODB_URI is missing)
-const NO_DB_PATHS = ['/api/health', '/api/health/db']
+const NO_DB_PATHS = ['/api/health', '/api/health/db', '/health', '/health/db']
 const isNoDbPath = (path) => path === '/api' || path === '' || path === '/' || NO_DB_PATHS.some((p) => path === p || path.startsWith(p + '?'))
 
 app.use(async (req, res, next) => {
