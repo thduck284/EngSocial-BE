@@ -1,9 +1,10 @@
 import mongoose from 'mongoose'
 
+// Must run before any model/query; required for serverless (cold start).
+mongoose.set('bufferCommands', true)
+
 const DEBUG_DB = process.env.DEBUG_DB === '1' || process.env.NODE_ENV !== 'production'
 const log = (...args) => DEBUG_DB && console.log('[DB]', ...args)
-
-mongoose.set('bufferCommands', true)
 
 let connectPromise = null
 
@@ -22,6 +23,7 @@ const connectDB = async () => {
     serverSelectionTimeoutMS: 20000,
     maxPoolSize: 10,
     bufferCommands: true,
+    bufferTimeoutMS: 30000,
   })
   try {
     const conn = await connectPromise
@@ -54,4 +56,12 @@ export async function ensureConnected() {
     await connectDB()
   }
   log('ensureConnected: done, readyState=', mongoose.connection.readyState)
+}
+
+// Start connection as soon as module loads (serverless cold start)
+if (typeof process !== 'undefined' && process.env.MONGODB_URI) {
+  connectDB().catch((err) => {
+    console.error('[DB] warm-up connect failed', err.message)
+    connectPromise = null
+  })
 }

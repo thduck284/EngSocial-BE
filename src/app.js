@@ -1,4 +1,7 @@
 import './config/db.js'
+import mongoose from 'mongoose'
+// Force bufferCommands true so serverless cold start does not throw "before initial connection"
+mongoose.set('bufferCommands', true)
 import express from 'express'
 import cors from 'cors'
 import routes from './routes/index.js'
