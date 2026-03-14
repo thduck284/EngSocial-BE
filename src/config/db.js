@@ -21,6 +21,7 @@ const connectDB = async () => {
     dbName: process.env.DB_NAME || 'engsocial',
     serverSelectionTimeoutMS: 20000,
     maxPoolSize: 10,
+    bufferCommands: true,
   })
   try {
     const conn = await connectPromise
