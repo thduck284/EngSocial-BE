@@ -63,8 +63,9 @@ app.get('/api', (req, res) => {
   })
 })
 
-// Mount all routes
+// Mount all routes: /api/* and /* (Vercel may forward without /api prefix)
 app.use('/api', routes)
+app.use(routes)
 
 // Error handling
 app.use(notFound)
