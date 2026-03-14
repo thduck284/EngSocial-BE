@@ -3,10 +3,20 @@ import cors from 'cors'
 import routes from './routes/index.js'
 import { notFound, errorHandler } from './middlewares/error.middleware.js'
 import { locale } from './middlewares/locale.middleware.js'
+import { ensureConnected } from './config/db.js'
 
 const app = express()
 
-// Middleware
+app.use(async (req, res, next) => {
+  if (!req.path.startsWith('/api')) return next()
+  try {
+    await ensureConnected()
+    next()
+  } catch (err) {
+    next(err)
+  }
+})
+
 app.use(cors({
   origin: process.env.CORS_ORIGIN
     ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
