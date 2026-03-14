@@ -11,7 +11,13 @@ import { ensureConnected } from './config/db.js'
 
 const app = express()
 
-const DEBUG_DB = process.env.DEBUG_DB === '1' || process.env.NODE_ENV !== 'production'
+// CORS first so every response (including 503/500) has Allow-Origin header
+app.use(cors({
+  origin: process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
+    : ['https://eng-social-fe.vercel.app', 'http://localhost:3000'],
+  credentials: true,
+}))
 
 // Routes that do not require DB (so we can return 503 for others when MONGODB_URI is missing)
 const NO_DB_PATHS = ['/api/health', '/api/health/db', '/health', '/health/db']
@@ -25,21 +31,12 @@ app.use(async (req, res, next) => {
         message: 'Database not configured. Set MONGODB_URI in Vercel Environment Variables.',
       })
     }
-    if (DEBUG_DB) console.log('[API] before ensureConnected', req.method, req.path)
     await ensureConnected()
-    if (DEBUG_DB) console.log('[API] after ensureConnected, calling next()')
     next()
   } catch (err) {
     next(err)
   }
 })
-
-app.use(cors({
-  origin: process.env.CORS_ORIGIN
-    ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
-    : ['https://eng-social-fe.vercel.app', 'http://localhost:3000'],
-  credentials: true,
-}))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 

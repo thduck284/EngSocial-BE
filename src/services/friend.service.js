@@ -2,8 +2,8 @@ import mongoose from 'mongoose'
 import { Friendship, User } from '../models/index.js'
 import { FriendshipDTO } from '../dto/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
-import { isElasticsearchEnabled } from '../elasticsearch/client.js'
-import { searchUserIds } from '../elasticsearch/userSearch.service.js'
+import { isElasticsearchEnabled } from '../config/elasticsearch/client.js'
+import { searchUserIds } from '../config/elasticsearch/userSearch.service.js'
 
 /**
  * Send friend request

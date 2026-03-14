@@ -42,7 +42,7 @@ async function start() {
 
   if (process.env.MONGODB_URI && (process.env.ELASTICSEARCH_NODE || process.env.ELASTICSEARCH_URL)) {
     try {
-      const { initUserSearch } = await import('./elasticsearch/userSearch.service.js')
+      const { initUserSearch } = await import('./config/elasticsearch/userSearch.service.js')
       const { User } = await import('./models/index.js')
       await initUserSearch(async () => {
         const list = await User.find({}).select('name email updatedAt').lean()

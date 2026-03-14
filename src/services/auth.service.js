@@ -1,9 +1,8 @@
 import crypto from 'crypto'
-import mongoose from 'mongoose'
-import { User, RefreshToken, PasswordResetToken } from '../models/index.js'
+import { User, RefreshToken, PasswordResetToken } from '../models/auth/index.js'
 import { hashPassword, comparePassword, generateTokenPair } from '../utils/index.js'
 import { UserDTO, AuthResponseDTO, RefreshTokenResponseDTO } from '../dto/index.js'
-import { indexUser } from '../elasticsearch/userSearch.service.js'
+import { indexUser } from '../config/elasticsearch/userSearch.service.js'
 
 /**
  * Register new user
@@ -59,11 +58,7 @@ export const register = async ({ email, password, name, gender, dateOfBirth }) =
  * Login user
  */
 export const login = async ({ email, password }) => {
-  const DEBUG_DB = process.env.DEBUG_DB === '1' || process.env.NODE_ENV !== 'production'
-  if (DEBUG_DB) console.log('[Auth] login: before User.findOne, readyState=', mongoose.connection.readyState)
   const user = await User.findOne({ email }).select('+password')
-  if (DEBUG_DB) console.log('[Auth] login: after User.findOne')
-  
   if (!user) {
     throw new Error('INVALID_CREDENTIALS')
   }
@@ -234,13 +229,7 @@ export const forgotPassword = async (email, lang = 'vi') => {
   const { sendPasswordResetEmail } = await import('./email.service.js')
   try {
     await sendPasswordResetEmail(user.email, resetLink, lang)
-  } catch (err) {
-    // Log nhưng vẫn trả success (không lộ email). Link vẫn log trong email.service nếu không có SMTP.
-    if (process.env.NODE_ENV !== 'production') {
-      // eslint-disable-next-line no-console
-      console.log('[dev] Reset link (email gửi lỗi):', resetLink)
-    }
-  }
+  } catch (_) {}
 
   return { ok: true }
 }
