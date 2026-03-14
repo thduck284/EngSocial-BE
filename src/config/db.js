@@ -6,6 +6,7 @@ let connectPromise = null
 
 async function pingConnection() {
   try {
+    if (!mongoose.connection.db) return false
     await mongoose.connection.db.admin().ping()
     return true
   } catch {
