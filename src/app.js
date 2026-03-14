@@ -11,12 +11,34 @@ import { ensureConnected } from './config/db.js'
 
 const app = express()
 
-// CORS first so every response (including 503/500) has Allow-Origin header
+const DEFAULT_CORS = ['https://eng-social-fe.vercel.app', 'http://localhost:3000']
+const FROM_ENV = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
+  : []
+const CORS_ORIGINS = [...new Set([...DEFAULT_CORS, ...FROM_ENV])]
+
+function corsOrigin(origin) {
+  if (!origin) return CORS_ORIGINS[0]
+  if (CORS_ORIGINS.includes(origin)) return origin
+  return CORS_ORIGINS[0]
+}
+
+// Set CORS headers on every response (so 4xx/5xx and preflight always have them)
+app.use((req, res, next) => {
+  const origin = corsOrigin(req.headers.origin)
+  res.setHeader('Access-Control-Allow-Origin', origin)
+  res.setHeader('Access-Control-Allow-Credentials', 'true')
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept-Language')
+  if (req.method === 'OPTIONS') return res.sendStatus(204)
+  next()
+})
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN
-    ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
-    : ['https://eng-social-fe.vercel.app', 'http://localhost:3000'],
+  origin: (o, cb) => cb(null, corsOrigin(o)),
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept-Language'],
 }))
 
 // Routes that do not require DB (so we can return 503 for others when MONGODB_URI is missing)
