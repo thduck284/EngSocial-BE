@@ -4,16 +4,6 @@ mongoose.set('bufferCommands', false)
 
 let connectPromise = null
 
-async function pingConnection() {
-  try {
-    if (!mongoose.connection.db) return false
-    await mongoose.connection.db.admin().ping()
-    return true
-  } catch {
-    return false
-  }
-}
-
 const connectDB = async () => {
   if (!process.env.MONGODB_URI) return
   if (connectPromise) return connectPromise
@@ -38,13 +28,5 @@ export default connectDB
 
 export async function ensureConnected() {
   if (!process.env.MONGODB_URI) return
-  if (mongoose.connection.readyState === 1) {
-    const ok = await pingConnection()
-    if (ok) return
-    connectPromise = null
-    try {
-      await mongoose.connection.close()
-    } catch {}
-  }
   await connectDB()
 }
