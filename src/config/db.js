@@ -44,5 +44,13 @@ export async function ensureConnected() {
     return
   }
   await connectDB()
+  if (mongoose.connection.readyState !== 1) {
+    log('ensureConnected: readyState not 1, reconnecting...', mongoose.connection.readyState)
+    connectPromise = null
+    try {
+      await mongoose.connection.close()
+    } catch {}
+    await connectDB()
+  }
   log('ensureConnected: done, readyState=', mongoose.connection.readyState)
 }
