@@ -3,7 +3,7 @@ import mongoose from 'mongoose'
 const DEBUG_DB = process.env.DEBUG_DB === '1' || process.env.NODE_ENV !== 'production'
 const log = (...args) => DEBUG_DB && console.log('[DB]', ...args)
 
-mongoose.set('bufferCommands', false)
+mongoose.set('bufferCommands', true)
 
 let connectPromise = null
 
