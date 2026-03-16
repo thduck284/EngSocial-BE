@@ -15,6 +15,13 @@ const router = Router()
 router.get('/profile', auth, userController.getProfile)
 
 /**
+ * @route   GET /api/user/achievements
+ * @desc    Get all achievements with current user unlock state
+ * @access  Private
+ */
+router.get('/achievements', auth, userController.getAchievements)
+
+/**
  * @route   GET /api/user/profile/:userId
  * @desc    Get public profile of another user (cần đăng nhập)
  * @access  Private

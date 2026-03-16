@@ -1,18 +1,21 @@
 import { Router } from 'express'
 import * as communityController from '../../controllers/community.controller.js'
-import { auth } from '../../middlewares/auth.middleware.js'
+import { auth, optionalAuth } from '../../middlewares/auth.middleware.js'
 import { validate } from '../../middlewares/validate.middleware.js'
-import { createPostSchema, updatePostSchema, createCommentSchema } from '../../validators/community.validator.js'
+import { createPostSchema, updatePostSchema, createCommentSchema, setReactionSchema } from '../../validators/community.validator.js'
 
 const router = Router()
 
-// Posts
-router.get('/posts', communityController.getPosts)
-router.get('/posts/:id', communityController.getPostById)
+// Posts (optionalAuth: only filter visibility when viewing someone else's posts)
+router.get('/posts', optionalAuth, communityController.getPosts)
+router.get('/posts/:id', optionalAuth, communityController.getPostById)
+router.get('/posts/:postId/documents/:index/download', communityController.downloadPostDocument)
 router.post('/posts', auth, validate(createPostSchema), communityController.createPost)
 router.patch('/posts/:id', auth, validate(updatePostSchema), communityController.updatePost)
 router.delete('/posts/:id', auth, communityController.deletePost)
+router.get('/posts/:id/reactions', communityController.getPostReactions)
 router.post('/posts/:id/like', auth, communityController.toggleLike)
+router.post('/posts/:id/reaction', auth, validate(setReactionSchema), communityController.setReaction)
 
 // Comments
 router.get('/posts/:postId/comments', communityController.getComments)

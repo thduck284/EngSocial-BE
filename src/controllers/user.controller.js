@@ -1,6 +1,7 @@
 import * as authService from '../services/auth.service.js'
 import * as userService from '../services/user.service.js'
 import * as uploadService from '../services/upload.service.js'
+import * as achievementService from '../services/achievement.service.js'
 import { sendSuccess, sendError } from '../dto/index.js'
 import { emitToUser } from '../config/socket.js'
 
@@ -44,6 +45,22 @@ export const updateProfile = async (req, res, next) => {
         messageKey: 'auth.userNotFound',
       }, req)
     }
+    next(error)
+  }
+}
+
+/**
+ * Get current user's achievements (all achievements with unlocked state)
+ * GET /api/user/achievements
+ */
+export const getAchievements = async (req, res, next) => {
+  try {
+    const list = await achievementService.getAchievementsForUser(req.userId)
+    return sendSuccess(res, {
+      messageKey: 'user.achievementsFetched',
+      data: { achievements: list },
+    }, req)
+  } catch (error) {
     next(error)
   }
 }

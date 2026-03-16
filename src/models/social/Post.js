@@ -13,7 +13,8 @@ const postSchema = new mongoose.Schema({
   content: { type: String, required: true, maxlength: 5000 },
   images: [String],
   video: String,
-  documents: [String],
+  // documents: array of { url, name } or legacy string (url only)
+  documents: [mongoose.Schema.Types.Mixed],
   likeCount: { type: Number, default: 0 },
   commentCount: { type: Number, default: 0 },
   shareCount: { type: Number, default: 0 },

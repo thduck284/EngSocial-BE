@@ -51,6 +51,27 @@ export class GroupMemberDTO extends BaseDTO {
   }
 }
 
+/** Map mentions to { id, name?, avatar? } for display (populated or plain id) */
+function mapMentions(mentions) {
+  if (!Array.isArray(mentions)) return []
+  return mentions.map((m) => {
+    if (m && typeof m === 'object' && (m._id || m.id)) {
+      return { id: (m._id || m.id).toString(), name: m.name, avatar: m.avatar }
+    }
+    return { id: m?.toString?.() || m }
+  })
+}
+
+/** Normalize documents to [{ url, name }] for API (legacy: string -> { url, name: '' }) */
+function mapDocuments(docs) {
+  if (!Array.isArray(docs)) return []
+  return docs.map((d) => {
+    if (typeof d === 'string') return { url: d, name: '' }
+    if (d && typeof d === 'object' && d.url) return { url: d.url, name: d.name || '' }
+    return { url: '', name: '' }
+  })
+}
+
 export class PostDTO extends BaseDTO {
   constructor(post) {
     super({
@@ -60,7 +81,7 @@ export class PostDTO extends BaseDTO {
       content: post.content,
       images: post.images,
       video: post.video,
-      documents: post.documents,
+      documents: mapDocuments(post.documents),
       likeCount: post.likeCount,
       commentCount: post.commentCount,
       shareCount: post.shareCount,
@@ -69,7 +90,7 @@ export class PostDTO extends BaseDTO {
       visibility: post.visibility,
       status: post.status,
       tags: post.tags,
-      mentions: post.mentions?.map(id => id.toString()),
+      mentions: mapMentions(post.mentions),
       createdAt: post.createdAt,
       updatedAt: post.updatedAt,
     })
@@ -85,7 +106,7 @@ export class PostDetailDTO extends BaseDTO {
       content: post.content,
       images: post.images,
       video: post.video,
-      documents: post.documents,
+      documents: mapDocuments(post.documents),
       likeCount: post.likeCount,
       commentCount: post.commentCount,
       shareCount: post.shareCount,
@@ -94,7 +115,7 @@ export class PostDetailDTO extends BaseDTO {
       visibility: post.visibility,
       status: post.status,
       tags: post.tags,
-      mentions: post.mentions?.map(id => id.toString()),
+      mentions: mapMentions(post.mentions),
       createdAt: post.createdAt,
       updatedAt: post.updatedAt,
     })

@@ -237,22 +237,19 @@ export const submitWriting = async (userId, lessonId, { content, wordCount }) =>
 /**
  * Get user progress for all lessons (or filter by skill)
  */
-export const getUserProgress = async (userId, { skill, status, page = 1, limit = 10 }) => {
+export const getUserProgress = async (userId, { skill, status, category, page = 1, limit = 10 }) => {
   const filter = { userId }
   if (status) filter.status = status
-
-  let lessonFilter = {}
-  if (skill) lessonFilter.skill = skill
 
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
 
   let query = UserLessonProgress.find(filter).populate('lessonId')
   const allProgress = await query.sort({ lastAccessedAt: -1 }).skip(skip).limit(perPage)
 
-  // Filter by skill after populate
-  const filtered = skill
-    ? allProgress.filter(p => p.lessonId?.skill === skill)
-    : allProgress
+  // Filter by skill and category after populate
+  let filtered = allProgress
+  if (skill) filtered = filtered.filter(p => p.lessonId?.skill === skill)
+  if (category) filtered = filtered.filter(p => p.lessonId?.category === category)
 
   const total = await UserLessonProgress.countDocuments(filter)
 

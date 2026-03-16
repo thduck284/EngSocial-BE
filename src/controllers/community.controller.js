@@ -1,3 +1,4 @@
+import { Readable } from 'stream'
 import * as communityService from '../services/community.service.js'
 import { sendSuccess, sendError, sendPaginated } from '../dto/index.js'
 
@@ -6,7 +7,8 @@ import { sendSuccess, sendError, sendPaginated } from '../dto/index.js'
 export const getPosts = async (req, res, next) => {
   try {
     const { visibility, groupId, authorId, search, page, limit } = req.query
-    const result = await communityService.getPosts({ visibility, groupId, authorId, search, page, limit })
+    const viewerId = req.userId || null
+    const result = await communityService.getPosts({ visibility, groupId, authorId, search, page, limit, viewerId })
     return sendPaginated(res, {
       messageKey: 'community.listSuccess',
       data: result.posts,
@@ -19,13 +21,46 @@ export const getPosts = async (req, res, next) => {
 
 export const getPostById = async (req, res, next) => {
   try {
-    const post = await communityService.getPostById(req.params.id)
+    const viewerId = req.userId || null
+    const post = await communityService.getPostById(req.params.id, viewerId)
     return sendSuccess(res, {
       messageKey: 'community.detailSuccess',
       data: { post },
     }, req)
   } catch (error) {
     if (error.message === 'POST_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'community.postNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+/** Safe filename for Content-Disposition (strip path and non-printable) */
+function safeAttachmentFilename(name) {
+  if (!name || typeof name !== 'string') return 'document'
+  const base = name.replace(/^.*[/\\]/, '').replace(/[^\w.\- ]/gi, '_')
+  return base.trim() || 'document'
+}
+
+export const downloadPostDocument = async (req, res, next) => {
+  try {
+    const { postId, index } = req.params
+    const { url, name } = await communityService.getPostDocument(postId, index)
+    const fetchRes = await fetch(url, { redirect: 'follow' })
+    if (!fetchRes.ok) {
+      return sendError(res, { statusCode: 502, messageKey: 'common.error', message: 'Failed to fetch document' }, req)
+    }
+    const filename = safeAttachmentFilename(name)
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    const contentType = fetchRes.headers.get('content-type')
+    if (contentType) res.setHeader('Content-Type', contentType)
+    const nodeStream = Readable.fromWeb(fetchRes.body)
+    nodeStream.pipe(res)
+  } catch (error) {
+    if (error.message === 'POST_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'community.postNotFound' }, req)
+    }
+    if (error.message === 'DOCUMENT_NOT_FOUND') {
       return sendError(res, { statusCode: 404, messageKey: 'community.postNotFound' }, req)
     }
     next(error)
@@ -83,6 +118,37 @@ export const toggleLike = async (req, res, next) => {
     const result = await communityService.toggleLike(req.userId, req.params.id)
     return sendSuccess(res, {
       messageKey: result.liked ? 'community.liked' : 'community.unliked',
+      data: result,
+    }, req)
+  } catch (error) {
+    if (error.message === 'POST_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'community.postNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+export const setReaction = async (req, res, next) => {
+  try {
+    const { reaction } = req.body || {}
+    const result = await communityService.setReaction(req.userId, req.params.id, reaction)
+    return sendSuccess(res, {
+      messageKey: result.liked ? 'community.liked' : 'community.unliked',
+      data: result,
+    }, req)
+  } catch (error) {
+    if (error.message === 'POST_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'community.postNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+export const getPostReactions = async (req, res, next) => {
+  try {
+    const result = await communityService.getPostReactions(req.params.id)
+    return sendSuccess(res, {
+      messageKey: 'community.reactionsSuccess',
       data: result,
     }, req)
   } catch (error) {

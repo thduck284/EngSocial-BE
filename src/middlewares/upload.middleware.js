@@ -34,8 +34,10 @@ export const uploadLessonAsset = multer({
 
 const postMediaTypes = [
   'image/jpeg', 'image/png', 'image/gif', 'image/webp',
-  'video/mp4', 'video/webm', 'video/quicktime',
+  'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/x-ms-wmv',
+  'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/mp4', 'audio/webm', 'audio/ogg',
   'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ]
 const postMediaFilter = (req, file, cb) => {
   if (postMediaTypes.includes(file.mimetype)) {

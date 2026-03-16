@@ -1,6 +1,7 @@
 import mongoose from 'mongoose'
 import Lesson from '../models/learning/Lesson.js'
 import UserLessonProgress from '../models/learning/UserLessonProgress.js'
+import * as lessonService from '../services/lesson.service.js'
 import { LessonDTO, LessonDetailDTO } from '../dto/learning/response/lesson.response.js'
 import { sendSuccess, sendPaginated, sendError } from '../dto/index.js'
 import { generateUniqueSlug } from '../utils/slug.js'
@@ -64,6 +65,26 @@ export const getLessons = async (req, res, next) => {
       data,
       pagination: { currentPage: pageNum, perPage: limitNum, total, totalPages },
     }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * Get current user's lesson progress (history of done/in-progress lessons)
+ * GET /api/lessons/my-progress?skill=reading&status=completed&page=1&limit=10 (auth)
+ */
+export const getMyProgress = async (req, res, next) => {
+  try {
+    const { skill, status, category, page = 1, limit = 10 } = req.query
+    const result = await lessonService.getUserProgress(req.userId, {
+      skill: skill || undefined,
+      status: status || undefined,
+      category: category || undefined,
+      page: parseInt(page, 10) || 1,
+      limit: Math.min(50, Math.max(1, parseInt(limit, 10) || 10)),
+    })
+    return sendPaginated(res, { data: result.progress, pagination: result.pagination }, req)
   } catch (error) {
     next(error)
   }
@@ -216,7 +237,7 @@ export const deleteLesson = async (req, res, next) => {
 /**
  * Get reading lesson content - l?y t? DB
  * GET /api/lessons/reading/:id/content
- * :id có th? là _id ho?c slug
+ * :id cï¿½ th? lï¿½ _id ho?c slug
  */
 export const getReadingContent = async (req, res, next) => {
   try {
@@ -279,7 +300,7 @@ export const getReadingContent = async (req, res, next) => {
 }
 
 /**
- * Get listening lesson content - l?y t? DB (full data cho trang bài h?c)
+ * Get listening lesson content - l?y t? DB (full data cho trang bï¿½i h?c)
  * GET /api/lessons/listening/:id/content
  */
 export const getListeningContent = async (req, res, next) => {
@@ -374,7 +395,7 @@ export const getListeningContent = async (req, res, next) => {
 /**
  * Get writing lesson content - l?y t? DB
  * GET /api/lessons/writing/:id/content
- * :id có th? là _id ho?c slug
+ * :id cï¿½ th? lï¿½ _id ho?c slug
  */
 export const getWritingContent = async (req, res, next) => {
   try {
@@ -397,7 +418,7 @@ export const getWritingContent = async (req, res, next) => {
       title: lesson.title,
       level: lesson.level,
       topic: lesson.topic,
-      time: `${lesson.estimatedTime || 15} phút`,
+      time: `${lesson.estimatedTime || 15} phï¿½t`,
       xpReward: lesson.xpReward || 50,
       thumbnail: lesson.thumbnail,
       prompt: lesson.content?.prompt || '',
@@ -530,7 +551,7 @@ export const updateLessonProgress = async (req, res, next) => {
 /**
  * Mark lesson as completed for the current user
  * POST /api/lessons/:id/complete (auth)
- * Luu vào UserLessonProgress: status = 'completed', progress = 100, completedAt = now
+ * Luu vï¿½o UserLessonProgress: status = 'completed', progress = 100, completedAt = now
  */
 export const completeLesson = async (req, res, next) => {
   try {

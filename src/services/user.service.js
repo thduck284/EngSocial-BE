@@ -1,4 +1,6 @@
-import { User, Friendship } from '../models/index.js'
+import { User, Friendship, UserSkillStats } from '../models/index.js'
+
+const SKILL_LEVEL_NUM = { A1: 1, A2: 2, B1: 3, B2: 4, C1: 5, C2: 6 }
 
 /**
  * Get public profile of a user for viewing by another user.
@@ -10,12 +12,16 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
   }
 
   const user = await User.findById(targetUserId)
-    .select('name avatar bio level xp totalXp createdAt')
+    .select('name email avatar bio phone address dateOfBirth gender level xp totalXp createdAt')
     .lean()
 
   if (!user) return null
 
   const targetId = user._id.toString()
+
+  // Check if current user has blocked this profile user
+  const currentUserDoc = await User.findById(currentUserId).select('blockedUserIds').lean()
+  const blockedByMe = (currentUserDoc?.blockedUserIds || []).some((b) => b.toString() === targetId)
 
   // Friendship between current user and target
   const friendship = await Friendship.findOne({
@@ -85,11 +91,30 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
     }
   })
 
+  // Skill stats (reading, listening, writing) for "My skills" block
+  const skillStatsDocs = await UserSkillStats.find({ userId: targetId }).lean()
+  const skills = (skillStatsDocs || []).map((s) => {
+    const totalXp = Number(s.totalXpEarned) || 0
+    const level = SKILL_LEVEL_NUM[s.skillLevel] ?? 1
+    const percent = Math.min(100, Math.round(totalXp / 50))
+    return {
+      key: s.skill,
+      labelKey: `skills.${s.skill}`,
+      level,
+      percent,
+    }
+  })
+
   return {
     id: targetId,
     name: user.name,
+    email: user.email,
     avatar: user.avatar,
     bio: user.bio,
+    phone: user.phone,
+    address: user.address,
+    dateOfBirth: user.dateOfBirth,
+    gender: user.gender,
     level: user.level ?? 1,
     xp: user.xp ?? 0,
     totalXp: user.totalXp ?? 0,
@@ -97,9 +122,11 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
     friendStatus,
     friendshipId,
     pendingSentByMe,
+    blockedByMe,
     friendsCount,
     mutualFriendsCount,
     friends,
+    skills,
   }
 }
 
