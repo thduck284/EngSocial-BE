@@ -1,5 +1,5 @@
 import mongoose from 'mongoose'
-import { Post, PostReaction, Comment, User } from '../models/index.js'
+import { Post, Reaction, Comment, User } from '../models/index.js'
 import { PostDTO, PostDetailDTO, CommentDTO, CommentDetailDTO } from '../dto/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
 
@@ -55,24 +55,24 @@ export const getPosts = async ({ visibility, groupId, authorId, search, page = 1
     .skip(skip)
     .limit(perPage)
 
-  // If viewer is logged in, attach liked + userReaction per post from PostReaction
+  // If viewer is logged in, attach liked + userReaction per post from Reaction
   let reactionMap = new Map()
   if (viewerId && posts.length > 0) {
     const postIds = posts.map((p) => p._id)
-    const reactions = await PostReaction.find({ postId: { $in: postIds }, userId: viewerId }).select('postId reaction').lean()
-    reactionMap = new Map(reactions.map((r) => [r.postId?.toString(), r.reaction]).filter(([id]) => id))
+    const reactions = await Reaction.find({ targetType: 'post', targetId: { $in: postIds }, userId: viewerId }).select('targetId reaction').lean()
+    reactionMap = new Map(reactions.map((r) => [r.targetId?.toString(), r.reaction]).filter(([id]) => id))
   }
 
   // Aggregate reaction counts per post (which types: like, love, haha, ...) for display
   let reactionCountsMap = new Map()
   if (posts.length > 0) {
     const postIds = posts.map((p) => p._id)
-    const counts = await PostReaction.aggregate([
-      { $match: { postId: { $in: postIds } } },
-      { $group: { _id: { postId: '$postId', reaction: '$reaction' }, count: { $sum: 1 } } },
+    const counts = await Reaction.aggregate([
+      { $match: { targetType: 'post', targetId: { $in: postIds } } },
+      { $group: { _id: { targetId: '$targetId', reaction: '$reaction' }, count: { $sum: 1 } } },
     ])
     counts.forEach(({ _id, count }) => {
-      const pid = _id.postId?.toString()
+      const pid = _id.targetId?.toString()
       if (!pid) return
       if (!reactionCountsMap.has(pid)) reactionCountsMap.set(pid, {})
       reactionCountsMap.get(pid)[_id.reaction] = count
@@ -100,8 +100,8 @@ export const getPostById = async (postId, viewerId = null) => {
     .populate('mentions', 'name avatar')
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
   const dto = new PostDetailDTO(post, post.authorId)
-  const reactionCountsArr = await PostReaction.aggregate([
-    { $match: { postId: post._id } },
+  const reactionCountsArr = await Reaction.aggregate([
+    { $match: { targetType: 'post', targetId: post._id } },
     { $group: { _id: '$reaction', count: { $sum: 1 } } },
   ])
   const reactionCounts = reactionCountsArr.reduce((acc, { _id, count }) => {
@@ -109,7 +109,7 @@ export const getPostById = async (postId, viewerId = null) => {
     return acc
   }, {})
   if (!viewerId) return { ...dto, reactionCounts }
-  const reaction = await PostReaction.findOne({ postId, userId: viewerId }).select('reaction').lean()
+  const reaction = await Reaction.findOne({ targetType: 'post', targetId: postId, userId: viewerId }).select('reaction').lean()
   const userReaction = reaction?.reaction || null
   return { ...dto, liked: !!userReaction, userReaction, reactionCounts }
 }
@@ -203,8 +203,9 @@ export const deletePost = async (userId, postId) => {
  * Returns likeCount and reactionCounts so frontend can show actual reaction types.
  */
 async function getReactionCountsForPost(postId) {
-  const counts = await PostReaction.aggregate([
-    { $match: { postId: postId instanceof mongoose.Types.ObjectId ? postId : new mongoose.Types.ObjectId(postId) } },
+  const pid = postId instanceof mongoose.Types.ObjectId ? postId : new mongoose.Types.ObjectId(postId)
+  const counts = await Reaction.aggregate([
+    { $match: { targetType: 'post', targetId: pid } },
     { $group: { _id: '$reaction', count: { $sum: 1 } } },
   ])
   return counts.reduce((acc, { _id, count }) => {
@@ -217,10 +218,10 @@ export const setReaction = async (userId, postId, reaction) => {
   const post = await Post.findById(postId)
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
 
-  const existing = await PostReaction.findOne({ postId, userId })
+  const existing = await Reaction.findOne({ targetType: 'post', targetId: postId, userId })
   if (existing) {
     if (existing.reaction === reaction) {
-      await PostReaction.deleteOne({ _id: existing._id })
+      await Reaction.deleteOne({ _id: existing._id })
       await Post.findByIdAndUpdate(postId, { $inc: { likeCount: -1 } })
       const updated = await Post.findById(postId).select('likeCount').lean()
       const reactionCounts = await getReactionCountsForPost(postId)
@@ -232,7 +233,7 @@ export const setReaction = async (userId, postId, reaction) => {
     const reactionCounts = await getReactionCountsForPost(postId)
     return { liked: true, userReaction: reaction, likeCount: updated?.likeCount ?? 0, reactionCounts }
   }
-  await PostReaction.create({ postId, userId, reaction })
+  await Reaction.create({ targetType: 'post', targetId: postId, userId, reaction })
   await Post.findByIdAndUpdate(postId, { $inc: { likeCount: 1 } })
   const updated = await Post.findById(postId).select('likeCount').lean()
   const reactionCounts = await getReactionCountsForPost(postId)
@@ -243,10 +244,10 @@ export const setReaction = async (userId, postId, reaction) => {
  * Like/Unlike a post (legacy endpoint: toggles "like"). Prefer setReaction for 6 reaction types.
  */
 export const toggleLike = async (userId, postId) => {
-  const existing = await PostReaction.findOne({ postId, userId })
+  const existing = await Reaction.findOne({ targetType: 'post', targetId: postId, userId })
   if (existing) {
     if (existing.reaction === 'like') {
-      await PostReaction.deleteOne({ _id: existing._id })
+      await Reaction.deleteOne({ _id: existing._id })
       await Post.findByIdAndUpdate(postId, { $inc: { likeCount: -1 } })
       return { liked: false, userReaction: null }
     }
@@ -254,7 +255,7 @@ export const toggleLike = async (userId, postId) => {
     await existing.save()
     return { liked: true, userReaction: 'like' }
   }
-  await PostReaction.create({ postId, userId, reaction: 'like' })
+  await Reaction.create({ targetType: 'post', targetId: postId, userId, reaction: 'like' })
   await Post.findByIdAndUpdate(postId, { $inc: { likeCount: 1 } })
   return { liked: true, userReaction: 'like' }
 }
@@ -263,7 +264,7 @@ export const toggleLike = async (userId, postId) => {
  * Check if user reacted to a post; returns liked and userReaction.
  */
 export const checkLiked = async (userId, postId) => {
-  const r = await PostReaction.findOne({ postId, userId }).select('reaction').lean()
+  const r = await Reaction.findOne({ targetType: 'post', targetId: postId, userId }).select('reaction').lean()
   return { liked: !!r, userReaction: r?.reaction || null }
 }
 
@@ -274,7 +275,32 @@ export const checkLiked = async (userId, postId) => {
 export const getPostReactions = async (postId) => {
   const post = await Post.findById(postId).select('_id status').lean()
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
-  const raw = await PostReaction.find({ postId })
+  const raw = await Reaction.find({ targetType: 'post', targetId: postId })
+    .populate('userId', 'name avatar')
+    .select('reaction userId')
+    .lean()
+  const reactionCounts = raw.reduce((acc, r) => {
+    const type = r.reaction
+    if (type) acc[type] = (acc[type] || 0) + 1
+    return acc
+  }, {})
+  const reactions = raw.map((r) => ({
+    userId: r.userId?._id?.toString(),
+    name: r.userId?.name,
+    avatar: r.userId?.avatar,
+    reaction: r.reaction,
+  }))
+  return { reactionCounts, reactions }
+}
+
+/**
+ * Get list of reactions for a comment (for modal: who reacted and with which type).
+ * Returns reactionCounts and reactions array with user info.
+ */
+export const getCommentReactions = async (commentId) => {
+  const comment = await Comment.findById(commentId).select('_id status').lean()
+  if (!comment || comment.status !== 'active') throw new Error('COMMENT_NOT_FOUND')
+  const raw = await Reaction.find({ targetType: 'comment', targetId: commentId })
     .populate('userId', 'name avatar')
     .select('reaction userId')
     .lean()
@@ -295,12 +321,11 @@ export const getPostReactions = async (postId) => {
 /**
  * Get comments for a post
  */
-export const getComments = async (postId, { parentId, page = 1, limit = 20 }) => {
+export const getComments = async (postId, { parentId, page = 1, limit = 20, viewerId = null }) => {
   const filter = { postId, status: 'active' }
   if (parentId) {
+    // Chỉ lấy reply trực tiếp của một comment cụ thể
     filter.parentId = parentId
-  } else {
-    filter.parentId = { $eq: null }
   }
 
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
@@ -311,24 +336,99 @@ export const getComments = async (postId, { parentId, page = 1, limit = 20 }) =>
     .skip(skip)
     .limit(perPage)
 
+  // Attach liked + userReaction for viewer, and reactionCounts for each comment
+  let userReactionMap = new Map()
+  if (viewerId && comments.length > 0) {
+    const commentIds = comments.map((c) => c._id)
+    const reactions = await Reaction.find({ targetType: 'comment', targetId: { $in: commentIds }, userId: viewerId }).select('targetId reaction').lean()
+    userReactionMap = new Map(reactions.map((r) => [r.targetId?.toString(), r.reaction]).filter(([id]) => id))
+  }
+  let reactionCountsMap = new Map()
+  if (comments.length > 0) {
+    const commentIds = comments.map((c) => c._id)
+    const counts = await Reaction.aggregate([
+      { $match: { targetType: 'comment', targetId: { $in: commentIds } } },
+      { $group: { _id: { targetId: '$targetId', reaction: '$reaction' }, count: { $sum: 1 } } },
+    ])
+    counts.forEach(({ _id, count }) => {
+      const cid = _id.targetId?.toString()
+      if (!cid) return
+      if (!reactionCountsMap.has(cid)) reactionCountsMap.set(cid, {})
+      reactionCountsMap.get(cid)[_id.reaction] = count
+    })
+  }
+
   return {
-    comments: comments.map(c => new CommentDetailDTO(c, c.authorId)),
+    comments: comments.map((c) => {
+      const dto = new CommentDetailDTO(c, c.authorId)
+      const ur = viewerId ? userReactionMap.get(c._id?.toString()) || null : null
+      const reactionCounts = reactionCountsMap.get(c._id?.toString()) || {}
+      return { ...dto, liked: !!ur, userReaction: ur, reactionCounts }
+    }),
     pagination: getPagination({ page, limit: perPage, total }),
   }
+}
+
+async function getReactionCountsForComment(commentId) {
+  const cid = commentId instanceof mongoose.Types.ObjectId ? commentId : new mongoose.Types.ObjectId(commentId)
+  const counts = await Reaction.aggregate([
+    { $match: { targetType: 'comment', targetId: cid } },
+    { $group: { _id: '$reaction', count: { $sum: 1 } } },
+  ])
+  return counts.reduce((acc, { _id, count }) => {
+    acc[_id] = count
+    return acc
+  }, {})
+}
+
+export const setCommentReaction = async (userId, commentId, reaction) => {
+  const comment = await Comment.findById(commentId)
+  if (!comment || comment.status !== 'active') throw new Error('COMMENT_NOT_FOUND')
+
+  const existing = await Reaction.findOne({ targetType: 'comment', targetId: commentId, userId })
+  if (existing) {
+    if (existing.reaction === reaction) {
+      await Reaction.deleteOne({ _id: existing._id })
+      await Comment.findByIdAndUpdate(commentId, { $inc: { likeCount: -1 } })
+      const updated = await Comment.findById(commentId).select('likeCount').lean()
+      const reactionCounts = await getReactionCountsForComment(commentId)
+      return { liked: false, userReaction: null, likeCount: updated?.likeCount ?? 0, reactionCounts }
+    }
+    existing.reaction = reaction
+    await existing.save()
+    const updated = await Comment.findById(commentId).select('likeCount').lean()
+    const reactionCounts = await getReactionCountsForComment(commentId)
+    return { liked: true, userReaction: reaction, likeCount: updated?.likeCount ?? 0, reactionCounts }
+  }
+  await Reaction.create({ targetType: 'comment', targetId: commentId, userId, reaction })
+  await Comment.findByIdAndUpdate(commentId, { $inc: { likeCount: 1 } })
+  const updated = await Comment.findById(commentId).select('likeCount').lean()
+  const reactionCounts = await getReactionCountsForComment(commentId)
+  return { liked: true, userReaction: reaction, likeCount: updated?.likeCount ?? 0, reactionCounts }
 }
 
 /**
  * Create a comment
  */
-export const createComment = async (userId, postId, { content, parentId }) => {
+export const createComment = async (userId, postId, { content, parentId, images, video, audio, documents } = {}) => {
   const post = await Post.findById(postId)
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
+
+  const normImages = Array.isArray(images) ? images.filter((u) => typeof u === 'string' && u.trim()).slice(0, 10) : []
+  const normVideo = typeof video === 'string' && video.trim() ? video.trim() : null
+  const normAudio = typeof audio === 'string' && audio.trim() ? audio.trim() : null
+  const normDocs = normalizeDocuments(documents || []).slice(0, 5)
+  const safeContent = typeof content === 'string' ? content : ''
 
   const comment = await Comment.create({
     postId,
     authorId: userId,
-    content,
+    content: safeContent,
     parentId: parentId || null,
+    images: normImages,
+    video: normVideo,
+    audio: normAudio,
+    documents: normDocs,
   })
 
   await Post.findByIdAndUpdate(postId, { $inc: { commentCount: 1 } })

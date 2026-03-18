@@ -35,13 +35,29 @@ export const updatePostSchema = Joi.object({
 }).min(1)
 
 export const createCommentSchema = Joi.object({
-  content: Joi.string().required().max(1000),
+  content: Joi.string().max(1000).allow('').default(''),
+  images: Joi.array().items(Joi.string().max(2000)).max(10),
+  video: Joi.string().max(2000).allow(''),
+  audio: Joi.string().max(2000).allow(''),
+  documents: Joi.array().items(documentItemSchema).max(5),
   parentId: Joi.string(),
+}).custom((value, helpers) => {
+  const hasText = typeof value?.content === 'string' && value.content.trim().length > 0
+  const hasImages = Array.isArray(value?.images) && value.images.length > 0
+  const hasDocs = Array.isArray(value?.documents) && value.documents.length > 0
+  const hasVideo = typeof value?.video === 'string' && value.video.trim().length > 0
+  const hasAudio = typeof value?.audio === 'string' && value.audio.trim().length > 0
+  if (!hasText && !hasImages && !hasDocs && !hasVideo && !hasAudio) {
+    return helpers.error('any.custom')
+  }
+  return value
+}, 'content-or-media validation').messages({
+  'any.custom': 'Content or at least one attachment is required.',
 })
 
-import { POST_REACTION_TYPES } from '../models/social/PostReaction.js'
+import { REACTION_TYPES } from '../models/social/Reaction.js'
 
 /** Validate reaction type (like, love, haha, wow, sad, angry) */
 export const setReactionSchema = Joi.object({
-  reaction: Joi.string().valid(...POST_REACTION_TYPES).required(),
+  reaction: Joi.string().valid(...REACTION_TYPES).required(),
 })

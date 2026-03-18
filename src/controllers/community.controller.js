@@ -164,13 +164,45 @@ export const getPostReactions = async (req, res, next) => {
 export const getComments = async (req, res, next) => {
   try {
     const { parentId, page, limit } = req.query
-    const result = await communityService.getComments(req.params.postId, { parentId, page, limit })
+    const viewerId = req.userId || null
+    const result = await communityService.getComments(req.params.postId, { parentId, page, limit, viewerId })
     return sendPaginated(res, {
       messageKey: 'community.commentsSuccess',
       data: result.comments,
       pagination: result.pagination,
     }, req)
   } catch (error) {
+    next(error)
+  }
+}
+
+export const setCommentReaction = async (req, res, next) => {
+  try {
+    const { reaction } = req.body || {}
+    const result = await communityService.setCommentReaction(req.userId, req.params.commentId, reaction)
+    return sendSuccess(res, {
+      messageKey: result.liked ? 'community.liked' : 'community.unliked',
+      data: result,
+    }, req)
+  } catch (error) {
+    if (error.message === 'COMMENT_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'community.commentNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+export const getCommentReactions = async (req, res, next) => {
+  try {
+    const result = await communityService.getCommentReactions(req.params.commentId)
+    return sendSuccess(res, {
+      messageKey: 'community.reactionsSuccess',
+      data: result,
+    }, req)
+  } catch (error) {
+    if (error.message === 'COMMENT_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'community.commentNotFound' }, req)
+    }
     next(error)
   }
 }

@@ -18,8 +18,10 @@ router.post('/posts/:id/like', auth, communityController.toggleLike)
 router.post('/posts/:id/reaction', auth, validate(setReactionSchema), communityController.setReaction)
 
 // Comments
-router.get('/posts/:postId/comments', communityController.getComments)
+router.get('/posts/:postId/comments', optionalAuth, communityController.getComments)
 router.post('/posts/:postId/comments', auth, validate(createCommentSchema), communityController.createComment)
+router.get('/comments/:commentId/reactions', optionalAuth, communityController.getCommentReactions)
 router.delete('/comments/:commentId', auth, communityController.deleteComment)
+router.post('/comments/:commentId/reaction', auth, validate(setReactionSchema), communityController.setCommentReaction)
 
 export default router

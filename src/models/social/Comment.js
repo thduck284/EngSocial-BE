@@ -15,7 +15,19 @@ const commentSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Comment',
   },
-  content: { type: String, required: true, maxlength: 1000 },
+  content: { type: String, default: '', maxlength: 1000 },
+  images: { type: [String], default: [] }, // urls
+  video: { type: String }, // url
+  audio: { type: String }, // url (mp3/ogg/webm...)
+  documents: {
+    type: [
+      {
+        url: { type: String, required: true },
+        name: { type: String, default: '' },
+      },
+    ],
+    default: [],
+  },
   likeCount: { type: Number, default: 0 },
   replyCount: { type: Number, default: 0 },
   status: {
