@@ -705,24 +705,26 @@ db.posts.createIndex({ content: "text" })
 db.posts.createIndex({ tags: 1 })
 
 // ============================================
-// 15. POST LIKES COLLECTION
+// 15. POST REACTIONS COLLECTION (6 types: 👍 ❤️ 😂 😮 😢 😠)
 // ============================================
-db.createCollection("post_likes", {
+db.createCollection("post_reactions", {
   validator: {
     $jsonSchema: {
       bsonType: "object",
-      required: ["postId", "userId"],
+      required: ["postId", "userId", "reaction"],
       properties: {
         _id: { bsonType: "objectId" },
         postId: { bsonType: "objectId" },
         userId: { bsonType: "objectId" },
-        createdAt: { bsonType: "date" }
+        reaction: { enum: ["👍", "❤️", "😂", "😮", "😢", "😠"] },
+        createdAt: { bsonType: "date" },
+        updatedAt: { bsonType: "date" }
       }
     }
   }
 })
 
-db.post_likes.createIndex({ postId: 1, userId: 1 }, { unique: true })
+db.post_reactions.createIndex({ postId: 1, userId: 1 }, { unique: true })
 
 // ============================================
 // 16. COMMENTS COLLECTION
