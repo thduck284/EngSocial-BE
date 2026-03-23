@@ -1,15 +1,19 @@
 import dotenv from 'dotenv'
 import path from 'path'
+import fs from 'fs'
 import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '../..')
 
-// Load environment only from `.env` (no `.env.example` fallback).
-// If `.env` is missing or invalid, we let the app fail fast with a clear error.
-const r = dotenv.config({ path: path.join(root, '.env') })
-if (r.error) {
-  // eslint-disable-next-line no-console
-  console.error('[EngSocial-BE] Failed to load .env:', r.error.message)
-  throw new Error(`[EngSocial-BE] Missing/invalid .env: ${r.error.message}`)
+const envPath = path.join(root, '.env')
+
+if (!fs.existsSync(envPath)) {
+  console.warn(`[EngSocial-BE] .env not found at ${envPath}, using process.env`)
+} else {
+  const r = dotenv.config({ path: envPath })
+  if (r.error) {
+    console.error('[EngSocial-BE] Failed to load .env:', r.error.message)
+    throw new Error(`[EngSocial-BE] Invalid .env: ${r.error.message}`)
+  }
 }
