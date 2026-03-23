@@ -18,6 +18,7 @@ export const createPostSchema = Joi.object({
   mentions: Joi.array().items(Joi.string()),
   lessonId: Joi.string(),
   challengeId: Joi.string(),
+  sharedPostId: Joi.string(),
 })
 
 const documentItemSchema = Joi.alternatives().try(
@@ -32,6 +33,7 @@ export const updatePostSchema = Joi.object({
   visibility: Joi.string().valid('public', 'friends', 'group', 'private'),
   tags: Joi.array().items(Joi.string().max(50)),
   mentions: Joi.array().items(Joi.string()),
+  sharedPostId: Joi.string().allow(null, ''),
 }).min(1)
 
 export const createCommentSchema = Joi.object({

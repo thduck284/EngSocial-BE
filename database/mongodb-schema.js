@@ -480,6 +480,9 @@ db.createCollection("achievements", {
         },
         
         xpReward: { bsonType: "int" },
+        rewardType: { enum: ["both", "exp", "badge"] },
+        badgeName: { bsonType: "string" },
+        badgeImage: { bsonType: "string" },
         rarity: { enum: ["common", "uncommon", "rare", "epic", "legendary"] },
         
         order: { bsonType: "int" },

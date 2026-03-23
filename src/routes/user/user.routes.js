@@ -3,7 +3,7 @@ import * as userController from '../../controllers/user.controller.js'
 import { auth } from '../../middlewares/auth.middleware.js'
 import { validate } from '../../middlewares/validate.middleware.js'
 import { uploadAvatar as uploadAvatarMw } from '../../middlewares/upload.middleware.js'
-import { updateProfileSchema } from '../../validators/user.validator.js'
+import { updateProfileSchema, updateSkillProfileSchema } from '../../validators/user.validator.js'
 
 const router = Router()
 
@@ -13,6 +13,15 @@ const router = Router()
  * @access  Private
  */
 router.get('/profile', auth, userController.getProfile)
+
+/**
+ * @route   GET /api/user/stats
+ * @desc    Get current user's level + skill stats
+ * @access  Private
+ */
+router.get('/stats', auth, userController.getStats)
+router.get('/skills-profile', auth, userController.getMySkillProfile)
+router.patch('/skills-profile', auth, validate(updateSkillProfileSchema), userController.updateMySkillProfile)
 
 /**
  * @route   GET /api/user/achievements

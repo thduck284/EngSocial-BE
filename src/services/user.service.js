@@ -12,7 +12,7 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
   }
 
   const user = await User.findById(targetUserId)
-    .select('name email avatar bio phone address dateOfBirth gender level xp totalXp createdAt')
+    .select('name email avatar bio phone address dateOfBirth gender level xp totalXp createdAt profileSkills')
     .lean()
 
   if (!user) return null
@@ -93,7 +93,7 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
 
   // Skill stats (reading, listening, writing) for "My skills" block
   const skillStatsDocs = await UserSkillStats.find({ userId: targetId }).lean()
-  const skills = (skillStatsDocs || []).map((s) => {
+  const skillsRaw = (skillStatsDocs || []).map((s) => {
     const totalXp = Number(s.totalXpEarned) || 0
     const level = SKILL_LEVEL_NUM[s.skillLevel] ?? 1
     const percent = Math.min(100, Math.round(totalXp / 50))
@@ -101,7 +101,38 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
       key: s.skill,
       labelKey: `skills.${s.skill}`,
       level,
+      skillLevel: s.skillLevel,
       percent,
+      totalXpEarned: totalXp,
+      totalTimeSpent: Number(s.totalTimeSpent) || 0, // minutes
+      weeklyTimeSpent: Number(s.weeklyTimeSpent) || 0, // minutes
+      dailyTimeSpent: Number(s.dailyTimeSpent) || 0, // minutes
+      lessonsCompleted: Number(s.lessonsCompleted) || 0,
+      lessonsInProgress: Number(s.lessonsInProgress) || 0,
+      averageScore: Number(s.averageScore) || 0,
+      highestScore: Number(s.highestScore) || 0,
+    }
+  })
+
+  const defaultSkillKeys = ['reading', 'listening', 'writing']
+  const skillsByKey = new Map((skillsRaw || []).map((s) => [s.key, s]))
+  const skills = defaultSkillKeys.map((skillKey) => {
+    const existing = skillsByKey.get(skillKey)
+    if (existing) return existing
+    return {
+      key: skillKey,
+      labelKey: `skills.${skillKey}`,
+      level: 1,
+      skillLevel: 'A1',
+      percent: 0,
+      totalXpEarned: 0,
+      totalTimeSpent: 0,
+      weeklyTimeSpent: 0,
+      dailyTimeSpent: 0,
+      lessonsCompleted: 0,
+      lessonsInProgress: 0,
+      averageScore: 0,
+      highestScore: 0,
     }
   })
 
@@ -127,7 +158,67 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
     mutualFriendsCount,
     friends,
     skills,
+    profileSkills: user.profileSkills || { skills: {}, goals: [], activeView: 'bars', updatedAt: null },
   }
+}
+
+export const getMyStats = async (userId) => {
+  const user = await User.findById(userId).select('level xp').lean()
+  if (!user) return null
+
+  const skillDocs = await UserSkillStats.find({ userId }).lean()
+  const weeklyXp = { reading: 0, listening: 0, writing: 0 }
+  const skillStats = []
+  for (const doc of skillDocs || []) {
+    const totalXp = Number(doc.totalXpEarned) || 0
+    const percent = Math.min(100, Math.round(totalXp / 50))
+    weeklyXp[doc.skill] = totalXp
+    skillStats.push({
+      key: doc.skill,
+      labelKey: `skills.${doc.skill}`,
+      skillLevel: doc.skillLevel,
+      level: SKILL_LEVEL_NUM[doc.skillLevel] ?? 1,
+      percent,
+      totalXpEarned: totalXp,
+      totalTimeSpent: Number(doc.totalTimeSpent) || 0,
+      weeklyTimeSpent: Number(doc.weeklyTimeSpent) || 0,
+      dailyTimeSpent: Number(doc.dailyTimeSpent) || 0,
+      lessonsCompleted: Number(doc.lessonsCompleted) || 0,
+      lessonsInProgress: Number(doc.lessonsInProgress) || 0,
+      averageScore: Number(doc.averageScore) || 0,
+      highestScore: Number(doc.highestScore) || 0,
+    })
+  }
+
+  return {
+    level: Number(user.level) || 1,
+    currentXp: Number(user.xp) || 0,
+    xpToNextLevel: 500,
+    weeklyXp,
+    skillStats,
+  }
+}
+
+export const getMySkillProfile = async (userId) => {
+  const user = await User.findById(userId).select('profileSkills').lean()
+  if (!user) return null
+  return user.profileSkills || { skills: {}, goals: [], activeView: 'bars', updatedAt: null }
+}
+
+export const updateMySkillProfile = async (userId, payload) => {
+  const next = {
+    skills: payload?.skills && typeof payload.skills === 'object' ? payload.skills : {},
+    goals: Array.isArray(payload?.goals) ? payload.goals : [],
+    activeView: payload?.activeView === 'radar' ? 'radar' : 'bars',
+    updatedAt: new Date(),
+  }
+  const updated = await User.findByIdAndUpdate(
+    userId,
+    { $set: { profileSkills: next } },
+    { new: true, select: 'profileSkills' },
+  ).lean()
+  if (!updated) return null
+  return updated.profileSkills
 }
 
 /**

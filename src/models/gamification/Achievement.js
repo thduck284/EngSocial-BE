@@ -2,10 +2,9 @@ import mongoose from 'mongoose'
 
 const achievementSchema = new mongoose.Schema({
   key: { type: String, required: true, unique: true },
+  // name & description now store Vietnamese text directly
   name: { type: String, required: true },
-  nameVi: String,
   description: String,
-  descriptionVi: String,
   icon: String,
   color: String,
   type: {
@@ -22,6 +21,13 @@ const achievementSchema = new mongoose.Schema({
     value: Number,
   },
   xpReward: { type: Number, default: 0 },
+  rewardType: {
+    type: String,
+    enum: ['both', 'exp', 'badge'],
+    default: 'both',
+  },
+  badgeName: String,
+  badgeImage: String,
   rarity: {
     type: String,
     enum: ['common', 'uncommon', 'rare', 'epic', 'legendary'],

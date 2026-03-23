@@ -123,6 +123,13 @@ const userSchema = new mongoose.Schema({
   },
   /** Danh sách user bị mình chặn (chat 1-1: không nhận tin từ họ, họ vẫn thấy mình đã chặn) */
   blockedUserIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  // Custom profile tab: My Skills (self-assessment)
+  profileSkills: {
+    skills: { type: Object, default: {} },
+    goals: { type: [String], default: [] },
+    activeView: { type: String, enum: ['bars', 'radar'], default: 'bars' },
+    updatedAt: { type: Date, default: null },
+  },
 }, {
   timestamps: true,
   bufferCommands: true,

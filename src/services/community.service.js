@@ -11,13 +11,31 @@ function extractHashtags(content) {
   return [...new Set(matches.map((m) => m.slice(1).toLowerCase()))]
 }
 
-/** Normalize mention IDs to ObjectIds, validate existence, return array */
+/** Normalize mention IDs to ObjectIds, validate existence, return array + snapshot */
 async function normalizeMentionIds(mentionIds) {
-  if (!Array.isArray(mentionIds) || mentionIds.length === 0) return []
-  const ids = mentionIds.filter(Boolean).map((id) => (typeof id === 'string' && mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null)).filter(Boolean)
-  const users = await User.find({ _id: { $in: ids } }).select('_id').lean()
+  if (!Array.isArray(mentionIds) || mentionIds.length === 0) {
+    return { ids: [], snapshots: [] }
+  }
+  const ids = mentionIds
+    .filter(Boolean)
+    .map((id) =>
+      typeof id === 'string' && mongoose.Types.ObjectId.isValid(id)
+        ? new mongoose.Types.ObjectId(id)
+        : null
+    )
+    .filter(Boolean)
+  if (ids.length === 0) return { ids: [], snapshots: [] }
+
+  const users = await User.find({ _id: { $in: ids } })
+    .select('_id name avatar')
+    .lean()
   const validIds = users.map((u) => u._id)
-  return validIds
+  const snapshots = users.map((u) => ({
+    userId: u._id,
+    name: u.name,
+    avatar: u.avatar,
+  }))
+  return { ids: validIds, snapshots }
 }
 
 /** Normalize documents to [{ url, name }] for storage (accepts string or object) */
@@ -51,6 +69,10 @@ export const getPosts = async ({ visibility, groupId, authorId, search, page = 1
   const posts = await Post.find(filter)
     .populate('authorId', 'name avatar level totalXp')
     .populate('mentions', 'name avatar')
+    .populate({
+      path: 'sharedPostId',
+      populate: { path: 'authorId', select: 'name avatar level totalXp' },
+    })
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(perPage)
@@ -98,6 +120,10 @@ export const getPostById = async (postId, viewerId = null) => {
   const post = await Post.findById(postId)
     .populate('authorId', 'name avatar level totalXp')
     .populate('mentions', 'name avatar')
+    .populate({
+      path: 'sharedPostId',
+      populate: { path: 'authorId', select: 'name avatar level totalXp' },
+    })
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
   const dto = new PostDetailDTO(post, post.authorId)
   const reactionCountsArr = await Reaction.aggregate([
@@ -135,7 +161,9 @@ export const createPost = async (userId, data) => {
   const tags = Array.isArray(data.tags) && data.tags.length > 0
     ? data.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean)
     : extractHashtags(data.content)
-  const mentionIds = await normalizeMentionIds(data.mentions || [])
+  const { ids: mentionIds, snapshots: mentionSnapshots } = await normalizeMentionIds(
+    data.mentions || []
+  )
 
   const post = await Post.create({
     authorId: userId,
@@ -147,8 +175,10 @@ export const createPost = async (userId, data) => {
     groupId: data.groupId,
     tags,
     mentions: mentionIds,
+    mentionSnapshots,
     lessonId: data.lessonId,
     challengeId: data.challengeId,
+    sharedPostId: data.sharedPostId || null,
   })
 
   const author = await User.findById(userId).select('name avatar level totalXp')
@@ -176,7 +206,12 @@ export const updatePost = async (userId, postId, data) => {
     post.tags = extractHashtags(data.content)
   }
   if (data.mentions !== undefined) {
-    post.mentions = await normalizeMentionIds(data.mentions)
+    const { ids, snapshots } = await normalizeMentionIds(data.mentions)
+    post.mentions = ids
+    post.mentionSnapshots = snapshots
+  }
+  if (data.sharedPostId !== undefined) {
+    post.sharedPostId = data.sharedPostId || null
   }
   await post.save()
 

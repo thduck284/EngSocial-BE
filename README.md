@@ -15,9 +15,8 @@ Backend API cho nền tảng học tiếng Anh EngSocial.
 # Install dependencies
 npm install
 
-# Copy environment
-cp .env.example .env
-# Edit .env with your MONGODB_URI
+# Edit environment
+# Set required variables in `.env` (for example: MONGODB_URI)
 
 # Run schema & seed (see database/README.md)
 # Then start server
@@ -46,7 +45,7 @@ EngSocial-BE/
 │   ├── config/         # DB config
 │   ├── app.js          # Express app
 │   └── server.js       # Entry point
-├── .env.example
+├── .env
 └── package.json
 ```
 

@@ -36,8 +36,9 @@ export const getGroupById = async (groupId) => {
  */
 export const createGroup = async (userId, data) => {
   const slug = generateUniqueSlug(data.name)
+  const { inviteUserIds, ...rest } = data || {}
   const group = await Group.create({
-    ...data,
+    ...rest,
     slug,
     createdBy: userId,
     admins: [userId],
@@ -52,7 +53,78 @@ export const createGroup = async (userId, data) => {
     joinedAt: new Date(),
   })
 
+  // Optional: add invited members immediately
+  if (Array.isArray(inviteUserIds) && inviteUserIds.length > 0) {
+    const uniqueIds = [...new Set(inviteUserIds.filter(Boolean).map(id => id.toString()))]
+    const filteredIds = uniqueIds.filter(id => id !== userId.toString())
+    if (filteredIds.length > 0) {
+      const existingMembers = await GroupMember.find({
+        groupId: group._id,
+        userId: { $in: filteredIds },
+      }).select('userId').lean()
+      const existingSet = new Set(existingMembers.map(m => m.userId.toString()))
+      const newMemberIds = filteredIds.filter(id => !existingSet.has(id))
+      if (newMemberIds.length > 0) {
+        const docs = newMemberIds.map(id => ({
+          groupId: group._id,
+          userId: id,
+          role: 'member',
+          status: 'active',
+          joinedAt: new Date(),
+        }))
+        await GroupMember.insertMany(docs)
+        await Group.findByIdAndUpdate(group._id, { $inc: { memberCount: newMemberIds.length } })
+      }
+    }
+  }
+
   return new GroupDTO(group)
+}
+
+/**
+ * Add members to existing group (used by community invite flow).
+ * Does not add duplicates or existing members.
+ */
+export const addMembersToGroup = async (groupId, userIds = []) => {
+  const group = await Group.findById(groupId)
+  if (!group || group.status !== 'active') throw new Error('GROUP_NOT_FOUND')
+
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return { added: 0 }
+  }
+
+  const uniqueIds = [...new Set(userIds.filter(Boolean).map((id) => id.toString()))]
+  if (uniqueIds.length === 0) {
+    return { added: 0 }
+  }
+
+  const existingMembers = await GroupMember.find({
+    groupId,
+    userId: { $in: uniqueIds },
+  })
+    .select('userId')
+    .lean()
+
+  const existingSet = new Set(existingMembers.map((m) => m.userId.toString()))
+  const newMemberIds = uniqueIds.filter((id) => !existingSet.has(id))
+
+  if (newMemberIds.length === 0) {
+    return { added: 0 }
+  }
+
+  const now = new Date()
+  const docs = newMemberIds.map((id) => ({
+    groupId,
+    userId: id,
+    role: 'member',
+    status: 'active',
+    joinedAt: now,
+  }))
+
+  await GroupMember.insertMany(docs)
+  await Group.findByIdAndUpdate(groupId, { $inc: { memberCount: newMemberIds.length } })
+
+  return { added: newMemberIds.length }
 }
 
 /**

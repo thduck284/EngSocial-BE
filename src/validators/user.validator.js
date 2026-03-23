@@ -61,3 +61,13 @@ export const updateProfileSchema = Joi.object({
 }).min(1).messages({
   'object.min': 'Cần ít nhất một trường để cập nhật',
 })
+
+export const updateSkillProfileSchema = Joi.object({
+  skills: Joi.object().pattern(
+    Joi.string(),
+    Joi.string().valid('A1', 'A2', 'B1', 'B2', 'C1', 'C2'),
+  ).required(),
+  goals: Joi.array().items(Joi.string()).required(),
+  activeView: Joi.string().valid('bars', 'radar').required(),
+})
+

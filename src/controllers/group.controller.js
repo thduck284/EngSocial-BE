@@ -91,6 +91,26 @@ export const getMembers = async (req, res, next) => {
   }
 }
 
+export const addMembers = async (req, res, next) => {
+  try {
+    const { userIds } = req.body || {}
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return sendError(res, { statusCode: 400, messageKey: 'common.validationFailed' }, req)
+    }
+    const result = await groupService.addMembersToGroup(req.params.id, userIds)
+    return sendSuccess(res, {
+      statusCode: 201,
+      messageKey: 'group.addMembersSuccess',
+      data: result,
+    }, req)
+  } catch (error) {
+    if (error.message === 'GROUP_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'group.notFound' }, req)
+    }
+    next(error)
+  }
+}
+
 export const getUserGroups = async (req, res, next) => {
   try {
     const { page, limit } = req.query

@@ -1,10 +1,9 @@
 import mongoose from 'mongoose'
 
 const challengeSchema = new mongoose.Schema({
+  // title & description now store Vietnamese text directly
   title: { type: String, required: true },
-  titleVi: String,
   description: String,
-  descriptionVi: String,
   type: {
     type: String,
     enum: ['daily', 'weekly', 'monthly', 'special'],

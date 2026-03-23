@@ -52,13 +52,34 @@ export class GroupMemberDTO extends BaseDTO {
 }
 
 /** Map mentions to { id, name?, avatar? } for display (populated or plain id) */
-function mapMentions(mentions) {
+function mapMentions(mentions, mentionSnapshots) {
   if (!Array.isArray(mentions)) return []
+  const byId =
+    Array.isArray(mentionSnapshots) && mentionSnapshots.length
+      ? new Map(
+          mentionSnapshots
+            .map((s) =>
+              s && (s.userId || s.id)
+                ? [s.userId?.toString?.() || s.id?.toString?.(), s]
+                : null
+            )
+            .filter(Boolean)
+        )
+      : null
+
   return mentions.map((m) => {
     if (m && typeof m === 'object' && (m._id || m.id)) {
-      return { id: (m._id || m.id).toString(), name: m.name, avatar: m.avatar }
+      const id = (m._id || m.id).toString()
+      const snap = byId ? byId.get(id) : null
+      return {
+        id,
+        name: m.name || snap?.name,
+        avatar: m.avatar || snap?.avatar,
+      }
     }
-    return { id: m?.toString?.() || m }
+    const id = m?.toString?.() || m
+    const snap = byId ? byId.get(id) : null
+    return { id, name: snap?.name, avatar: snap?.avatar }
   })
 }
 
@@ -90,7 +111,8 @@ export class PostDTO extends BaseDTO {
       visibility: post.visibility,
       status: post.status,
       tags: post.tags,
-      mentions: mapMentions(post.mentions),
+      mentions: mapMentions(post.mentions, post.mentionSnapshots),
+      sharedPostId: post.sharedPostId?.toString(),
       createdAt: post.createdAt,
       updatedAt: post.updatedAt,
     })
@@ -115,7 +137,14 @@ export class PostDetailDTO extends BaseDTO {
       visibility: post.visibility,
       status: post.status,
       tags: post.tags,
-      mentions: mapMentions(post.mentions),
+      mentions: mapMentions(post.mentions, post.mentionSnapshots),
+      // When this is a reshare, embed a lightweight version of the original post
+      sharedPost: post.sharedPostId
+        ? new PostDetailDTO(
+            post.sharedPostId,
+            post.sharedPostId.authorId || post.sharedPostId.author
+          )
+        : null,
       createdAt: post.createdAt,
       updatedAt: post.updatedAt,
     })

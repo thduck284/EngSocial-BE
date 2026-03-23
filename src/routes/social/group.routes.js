@@ -10,6 +10,7 @@ router.get('/:id', groupController.getGroupById)
 router.post('/', auth, groupController.createGroup)
 router.post('/:id/join', auth, groupController.joinGroup)
 router.post('/:id/leave', auth, groupController.leaveGroup)
+router.post('/:id/members', auth, groupController.addMembers)
 router.get('/:id/members', groupController.getMembers)
 
 export default router

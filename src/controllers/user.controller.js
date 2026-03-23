@@ -102,6 +102,45 @@ export const getPublicProfile = async (req, res, next) => {
 }
 
 /**
+ * Get current user dashboard stats (level + skill stats)
+ * GET /api/user/stats
+ */
+export const getStats = async (req, res, next) => {
+  try {
+    const data = await userService.getMyStats(req.userId)
+    return sendSuccess(res, { data }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * Get current user's custom profile skills tab data
+ * GET /api/user/skills-profile
+ */
+export const getMySkillProfile = async (req, res, next) => {
+  try {
+    const data = await userService.getMySkillProfile(req.userId)
+    return sendSuccess(res, { data }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * Update current user's custom profile skills tab data
+ * PATCH /api/user/skills-profile
+ */
+export const updateMySkillProfile = async (req, res, next) => {
+  try {
+    const data = await userService.updateMySkillProfile(req.userId, req.body)
+    return sendSuccess(res, { data }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
  * Chặn user (chat 1-1)
  * POST /api/user/block/:userId
  */
