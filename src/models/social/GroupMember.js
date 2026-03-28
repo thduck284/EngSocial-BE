@@ -18,7 +18,7 @@ const groupMemberSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['active', 'muted', 'banned'],
+    enum: ['active', 'pending', 'muted', 'banned'],
     default: 'active',
   },
   joinedAt: { type: Date, default: Date.now },

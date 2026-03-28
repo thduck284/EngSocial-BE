@@ -2,6 +2,38 @@ import { Group, GroupMember, User } from '../models/index.js'
 import { GroupDTO, GroupMemberDTO } from '../dto/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
 import { generateUniqueSlug } from '../utils/slug.js'
+import * as notificationService from './notification.service.js'
+import { emitToUser } from '../config/socket.js'
+
+/** Chỉ người tự xin vào (pending, không có invitedBy) */
+const selfJoinPendingFilter = {
+  $or: [{ invitedBy: { $exists: false } }, { invitedBy: null }],
+}
+
+async function notifyUsersGroupInvited(io, { groupId, inviterUserId, invitedUserIds }) {
+  if (!invitedUserIds?.length || !inviterUserId) return
+  const [group, inviter] = await Promise.all([
+    Group.findById(groupId).select('name').lean(),
+    User.findById(inviterUserId).select('name').lean(),
+  ])
+  const groupName = group?.name || 'Nhóm'
+  const inviterName = inviter?.name || 'Ai đó'
+  const gid = groupId?.toString?.() || String(groupId)
+  for (const rawId of invitedUserIds) {
+    const userId = rawId?.toString?.() || String(rawId)
+    const notification = await notificationService.createNotification({
+      userId: rawId,
+      type: 'group_invite',
+      title: 'Lời mời vào nhóm',
+      message: `${inviterName} mời bạn tham gia nhóm «${groupName}»`,
+      fromUserId: inviterUserId,
+      relatedId: groupId,
+      relatedType: 'group',
+      data: { groupId: gid, groupName },
+    })
+    emitToUser(io, userId, 'notification', notification)
+  }
+}
 
 /**
  * Get groups
@@ -34,7 +66,7 @@ export const getGroupById = async (groupId) => {
 /**
  * Create group
  */
-export const createGroup = async (userId, data) => {
+export const createGroup = async (userId, data, io = null) => {
   const slug = generateUniqueSlug(data.name)
   const { inviteUserIds, ...rest } = data || {}
   const group = await Group.create({
@@ -65,15 +97,20 @@ export const createGroup = async (userId, data) => {
       const existingSet = new Set(existingMembers.map(m => m.userId.toString()))
       const newMemberIds = filteredIds.filter(id => !existingSet.has(id))
       if (newMemberIds.length > 0) {
-        const docs = newMemberIds.map(id => ({
+        const docs = newMemberIds.map((id) => ({
           groupId: group._id,
           userId: id,
           role: 'member',
-          status: 'active',
+          status: 'pending',
           joinedAt: new Date(),
+          invitedBy: userId,
         }))
         await GroupMember.insertMany(docs)
-        await Group.findByIdAndUpdate(group._id, { $inc: { memberCount: newMemberIds.length } })
+        await notifyUsersGroupInvited(io, {
+          groupId: group._id,
+          inviterUserId: userId,
+          invitedUserIds: newMemberIds,
+        })
       }
     }
   }
@@ -82,10 +119,9 @@ export const createGroup = async (userId, data) => {
 }
 
 /**
- * Add members to existing group (used by community invite flow).
- * Does not add duplicates or existing members.
+ * Add members to existing group (community invite): tạo bản ghi chờ duyệt, không tăng memberCount.
  */
-export const addMembersToGroup = async (groupId, userIds = []) => {
+export const addMembersToGroup = async (groupId, userIds = [], invitedByUserId = null, io = null) => {
   const group = await Group.findById(groupId)
   if (!group || group.status !== 'active') throw new Error('GROUP_NOT_FOUND')
 
@@ -117,35 +153,52 @@ export const addMembersToGroup = async (groupId, userIds = []) => {
     groupId,
     userId: id,
     role: 'member',
-    status: 'active',
+    status: 'pending',
     joinedAt: now,
+    ...(invitedByUserId && { invitedBy: invitedByUserId }),
   }))
 
   await GroupMember.insertMany(docs)
-  await Group.findByIdAndUpdate(groupId, { $inc: { memberCount: newMemberIds.length } })
+
+  if (invitedByUserId) {
+    await notifyUsersGroupInvited(io, {
+      groupId,
+      inviterUserId: invitedByUserId,
+      invitedUserIds: newMemberIds,
+    })
+  }
 
   return { added: newMemberIds.length }
 }
 
+async function getActiveGroupModerator(actorUserId, groupId) {
+  const m = await GroupMember.findOne({ groupId, userId: actorUserId, status: 'active' })
+  if (!m || (m.role !== 'owner' && m.role !== 'admin')) return null
+  return m
+}
+
 /**
- * Join a group
+ * Xin tham gia nhóm: luôn tạo pending (mọi loại nhóm), chủ/admin duyệt mới vào — không tự động active.
  */
 export const joinGroup = async (userId, groupId) => {
   const group = await Group.findById(groupId)
   if (!group || group.status !== 'active') throw new Error('GROUP_NOT_FOUND')
 
   const existing = await GroupMember.findOne({ groupId, userId })
-  if (existing) throw new Error('ALREADY_MEMBER')
+  if (existing) {
+    if (existing.status === 'active') throw new Error('ALREADY_MEMBER')
+    if (existing.status === 'pending') throw new Error('JOIN_PENDING')
+    throw new Error('ALREADY_MEMBER')
+  }
 
   const member = await GroupMember.create({
     groupId,
     userId,
     role: 'member',
-    status: 'active',
+    status: 'pending',
     joinedAt: new Date(),
   })
 
-  await Group.findByIdAndUpdate(groupId, { $inc: { memberCount: 1 } })
   return new GroupMemberDTO(member)
 }
 
@@ -157,8 +210,46 @@ export const leaveGroup = async (userId, groupId) => {
   if (!member) throw new Error('NOT_MEMBER')
   if (member.role === 'owner') throw new Error('OWNER_CANNOT_LEAVE')
 
+  const wasActive = member.status === 'active'
   await GroupMember.deleteOne({ _id: member._id })
+  if (wasActive) {
+    await Group.findByIdAndUpdate(groupId, { $inc: { memberCount: -1 } })
+  }
+  return true
+}
+
+/**
+ * Remove another member (owner/admin only). Cannot remove owner or self.
+ */
+export const removeMemberFromGroup = async (actorUserId, groupId, targetUserId) => {
+  const group = await Group.findById(groupId)
+  if (!group || group.status !== 'active') throw new Error('GROUP_NOT_FOUND')
+
+  const actorIdStr = actorUserId.toString()
+  const targetIdStr = targetUserId.toString()
+
+  if (actorIdStr === targetIdStr) throw new Error('CANNOT_KICK_SELF')
+
+  const actor = await GroupMember.findOne({ groupId, userId: actorUserId, status: 'active' })
+  if (!actor) throw new Error('NOT_MEMBER')
+
+  const target = await GroupMember.findOne({ groupId, userId: targetUserId, status: 'active' })
+  if (!target) throw new Error('TARGET_NOT_MEMBER')
+
+  const elevated = actor.role === 'owner' || actor.role === 'admin'
+  if (!elevated) throw new Error('FORBIDDEN_KICK')
+
+  if (target.role === 'owner') throw new Error('CANNOT_KICK_OWNER')
+
+  if (actor.role === 'admin' && target.role === 'admin') throw new Error('FORBIDDEN_KICK')
+
+  await GroupMember.deleteOne({ _id: target._id })
   await Group.findByIdAndUpdate(groupId, { $inc: { memberCount: -1 } })
+
+  if (Array.isArray(group.admins) && group.admins.some((id) => id.toString() === targetIdStr)) {
+    await Group.findByIdAndUpdate(groupId, { $pull: { admins: targetUserId } })
+  }
+
   return true
 }
 
@@ -199,4 +290,179 @@ export const getUserGroups = async (userId, { page = 1, limit = 10 }) => {
     groups: memberships.map(m => m.groupId ? new GroupDTO(m.groupId) : null).filter(Boolean),
     pagination: getPagination({ page, limit: perPage, total }),
   }
+}
+
+/**
+ * Yêu cầu tham gia: chỉ người tự xin (pending, không invitedBy).
+ * invitedPendingUserIds: id user đang pending do được mời — dùng FE loại trùng modal mời.
+ */
+export const getGroupJoinRequests = async (actorUserId, groupId) => {
+  const group = await Group.findById(groupId)
+  if (!group || group.status !== 'active') throw new Error('GROUP_NOT_FOUND')
+
+  const mod = await getActiveGroupModerator(actorUserId, groupId)
+  if (!mod) throw new Error('FORBIDDEN_JOIN_REQUESTS')
+
+  const selfPending = await GroupMember.find({
+    groupId,
+    status: 'pending',
+    ...selfJoinPendingFilter,
+  })
+    .populate('userId', 'name avatar level totalXp')
+    .sort({ joinedAt: 1 })
+
+  const invitedPending = await GroupMember.find({
+    groupId,
+    status: 'pending',
+    invitedBy: { $exists: true, $ne: null },
+  })
+    .select('userId')
+    .lean()
+
+  const invitedPendingUserIds = invitedPending.map((row) => row.userId.toString())
+
+  const joinRequests = selfPending.map((m) => ({
+    ...new GroupMemberDTO(m),
+    user: m.userId
+      ? {
+          id: m.userId._id,
+          name: m.userId.name,
+          avatar: m.userId.avatar,
+          level: m.userId.level,
+        }
+      : null,
+  }))
+
+  return { joinRequests, invitedPendingUserIds }
+}
+
+export const approveGroupJoinRequest = async (actorUserId, groupId, targetUserId) => {
+  const group = await Group.findById(groupId)
+  if (!group || group.status !== 'active') throw new Error('GROUP_NOT_FOUND')
+
+  const mod = await getActiveGroupModerator(actorUserId, groupId)
+  if (!mod) throw new Error('FORBIDDEN_JOIN_REQUESTS')
+
+  const target = await GroupMember.findOne({
+    groupId,
+    userId: targetUserId,
+    status: 'pending',
+    ...selfJoinPendingFilter,
+  })
+  if (!target) throw new Error('REQUEST_NOT_FOUND')
+
+  target.status = 'active'
+  await target.save()
+  await Group.findByIdAndUpdate(groupId, { $inc: { memberCount: 1 } })
+  return new GroupMemberDTO(target)
+}
+
+export const rejectGroupJoinRequest = async (actorUserId, groupId, targetUserId) => {
+  const group = await Group.findById(groupId)
+  if (!group || group.status !== 'active') throw new Error('GROUP_NOT_FOUND')
+
+  const mod = await getActiveGroupModerator(actorUserId, groupId)
+  if (!mod) throw new Error('FORBIDDEN_JOIN_REQUESTS')
+
+  const target = await GroupMember.findOne({
+    groupId,
+    userId: targetUserId,
+    status: 'pending',
+    ...selfJoinPendingFilter,
+  })
+  if (!target) throw new Error('REQUEST_NOT_FOUND')
+
+  await GroupMember.deleteOne({ _id: target._id })
+  return true
+}
+
+const GROUP_TYPES = new Set(['public', 'private', 'invite_only'])
+
+/**
+ * Chủ nhóm / admin: cập nhật thông tin nhóm
+ */
+export const updateGroup = async (actorUserId, groupId, data = {}) => {
+  const group = await Group.findById(groupId)
+  if (!group || group.status !== 'active') throw new Error('GROUP_NOT_FOUND')
+
+  const mod = await getActiveGroupModerator(actorUserId, groupId)
+  if (!mod) throw new Error('FORBIDDEN_UPDATE_GROUP')
+
+  const patch = {}
+  if (data.name !== undefined) {
+    const name = String(data.name).trim()
+    if (!name || name.length > 100) throw new Error('INVALID_GROUP_NAME')
+    patch.name = name
+    if (name !== group.name) {
+      patch.slug = generateUniqueSlug(name)
+    }
+  }
+  if (data.description !== undefined) {
+    const d = data.description == null ? '' : String(data.description).trim()
+    if (d.length > 500) throw new Error('INVALID_GROUP_DESCRIPTION')
+    patch.description = d || undefined
+  }
+  if (data.icon !== undefined) {
+    const icon = data.icon == null ? '' : String(data.icon).trim()
+    patch.icon = icon || undefined
+  }
+  if (data.type !== undefined) {
+    const ty = String(data.type)
+    if (!GROUP_TYPES.has(ty)) throw new Error('INVALID_GROUP_TYPE')
+    patch.type = ty
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return new GroupDTO(group)
+  }
+  Object.assign(group, patch)
+  await group.save()
+  return new GroupDTO(group)
+}
+
+export const getMyGroupMembership = async (userId, groupId) => {
+  const group = await Group.findById(groupId)
+  if (!group || group.status === 'deleted') throw new Error('GROUP_NOT_FOUND')
+  const m = await GroupMember.findOne({ groupId, userId }).lean()
+  if (!m) return null
+  return {
+    status: m.status,
+    role: m.role,
+    invitedBy: m.invitedBy ? m.invitedBy.toString() : null,
+  }
+}
+
+/** Người được mời: chấp nhận lời mời (pending + có invitedBy) */
+export const acceptMyGroupInvite = async (userId, groupId) => {
+  const group = await Group.findById(groupId)
+  if (!group || group.status !== 'active') throw new Error('GROUP_NOT_FOUND')
+
+  const m = await GroupMember.findOne({
+    groupId,
+    userId,
+    status: 'pending',
+    invitedBy: { $exists: true, $ne: null },
+  })
+  if (!m) throw new Error('NO_INVITE')
+
+  m.status = 'active'
+  await m.save()
+  await Group.findByIdAndUpdate(groupId, { $inc: { memberCount: 1 } })
+  return new GroupMemberDTO(m)
+}
+
+export const declineMyGroupInvite = async (userId, groupId) => {
+  const group = await Group.findById(groupId)
+  if (!group || group.status !== 'active') throw new Error('GROUP_NOT_FOUND')
+
+  const m = await GroupMember.findOne({
+    groupId,
+    userId,
+    status: 'pending',
+    invitedBy: { $exists: true, $ne: null },
+  })
+  if (!m) throw new Error('NO_INVITE')
+
+  await GroupMember.deleteOne({ _id: m._id })
+  return true
 }

@@ -28,7 +28,7 @@ const documentItemSchema = Joi.alternatives().try(
 export const updatePostSchema = Joi.object({
   content: Joi.string().max(5000),
   images: Joi.array().items(Joi.string().max(2000)).max(10),
-  video: Joi.string().max(2000),
+  video: Joi.string().max(2000).allow(''),
   documents: Joi.array().items(documentItemSchema).max(5),
   visibility: Joi.string().valid('public', 'friends', 'group', 'private'),
   tags: Joi.array().items(Joi.string().max(50)),

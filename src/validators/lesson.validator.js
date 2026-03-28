@@ -50,7 +50,7 @@ export const createLessonSchema = Joi.object({
   })),
   estimatedTime: Joi.number().integer(),
   xpReward: Joi.number().integer().default(50),
-  status: Joi.string().valid('draft', 'published', 'archived'),
+  status: Joi.string().valid('published'),
   featured: Joi.boolean(),
   tags: Joi.array().items(Joi.string()),
 })
@@ -67,7 +67,7 @@ export const updateLessonSchema = Joi.object({
   vocabulary: Joi.array(),
   estimatedTime: Joi.number().integer(),
   xpReward: Joi.number().integer(),
-  status: Joi.string().valid('draft', 'published', 'archived'),
+  status: Joi.string().valid('published'),
   featured: Joi.boolean(),
   tags: Joi.array().items(Joi.string()),
 }).min(1)

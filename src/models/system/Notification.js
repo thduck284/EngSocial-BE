@@ -8,7 +8,7 @@ const notificationSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['comment', 'like', 'follow', 'challenge', 'achievement', 'goal', 'system', 'friend_request', 'friend_request_accepted'],
+    enum: ['comment', 'like', 'follow', 'challenge', 'achievement', 'goal', 'system', 'friend_request', 'friend_request_accepted', 'group_invite'],
     required: true,
   },
   title: String,
@@ -20,7 +20,7 @@ const notificationSchema = new mongoose.Schema({
   relatedId: mongoose.Schema.Types.ObjectId,
   relatedType: {
     type: String,
-    enum: ['post', 'lesson', 'challenge', 'achievement', 'user'],
+    enum: ['post', 'lesson', 'challenge', 'achievement', 'user', 'group'],
   },
   read: { type: Boolean, default: false },
   readAt: Date,

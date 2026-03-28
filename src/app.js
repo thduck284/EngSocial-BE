@@ -118,6 +118,7 @@ app.get('/api', (req, res) => {
       raw: '/api/raw',
       user: '/api/user',
       lessons: '/api/lessons',
+      vocabulary: '/api/vocabulary',
       practices: '/api/practices',
       quests: '/api/quests',
       skills: '/api/skills',

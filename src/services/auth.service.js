@@ -3,6 +3,7 @@ import { User, RefreshToken, PasswordResetToken } from '../models/auth/index.js'
 import { hashPassword, comparePassword, generateTokenPair } from '../utils/index.js'
 import { UserDTO, AuthResponseDTO, RefreshTokenResponseDTO } from '../dto/index.js'
 import { indexUser } from '../config/elasticsearch/userSearch.service.js'
+import { OAuth2Client } from 'google-auth-library'
 
 /**
  * Register new user
@@ -54,6 +55,26 @@ export const register = async ({ email, password, name, gender, dateOfBirth }) =
   })
 }
 
+const issueRefreshToken = async (userId, refreshToken) => {
+  const expiresAt = new Date()
+  expiresAt.setDate(expiresAt.getDate() + 7) // 7 days
+  await RefreshToken.create({
+    userId,
+    token: refreshToken,
+    expiresAt,
+  })
+}
+
+const buildAuthResponse = async (user) => {
+  const { accessToken, refreshToken } = generateTokenPair(user._id.toString())
+  await issueRefreshToken(user._id, refreshToken)
+  return new AuthResponseDTO({
+    user,
+    accessToken,
+    refreshToken,
+  })
+}
+
 /**
  * Login user
  */
@@ -76,16 +97,7 @@ export const login = async ({ email, password }) => {
 
   // Generate tokens
   const { accessToken, refreshToken } = generateTokenPair(user._id.toString())
-
-  // Save refresh token to database
-  const expiresAt = new Date()
-  expiresAt.setDate(expiresAt.getDate() + 7) // 7 days
-
-  await RefreshToken.create({
-    userId: user._id,
-    token: refreshToken,
-    expiresAt,
-  })
+  await issueRefreshToken(user._id, refreshToken)
 
   // Update last active date
   user.lastActiveDate = new Date()
@@ -97,6 +109,175 @@ export const login = async ({ email, password }) => {
     accessToken,
     refreshToken,
   })
+}
+
+/**
+ * Social login with Google (ID token)
+ */
+export const loginWithGoogle = async ({ idToken }) => {
+  try {
+    const clientId = process.env.GOOGLE_CLIENT_ID
+    const client = new OAuth2Client(clientId)
+    const ticket = await client.verifyIdToken({
+      idToken,
+      ...(clientId ? { audience: clientId } : {}),
+    })
+    const payload = ticket.getPayload()
+    const providerId = payload?.sub
+    const email = payload?.email ? String(payload.email).trim().toLowerCase() : ''
+    const name = payload?.name || payload?.given_name || 'User'
+    const picture = payload?.picture
+
+    if (!providerId) throw new Error('SOCIAL_TOKEN_INVALID')
+    if (!email) throw new Error('EMAIL_REQUIRED')
+
+    let user = await User.findOne({
+      $or: [{ provider: 'google', providerId }, { email }],
+    })
+
+    if (user?.status === 'banned') throw new Error('ACCOUNT_BANNED')
+
+    if (!user) {
+      const randomPassword = crypto.randomBytes(32).toString('hex') + 'Aa1'
+      const hashedPassword = await hashPassword(randomPassword)
+      user = await User.create({
+        email,
+        password: hashedPassword,
+        name,
+        avatar: picture,
+        status: 'active',
+        provider: 'google',
+        providerId,
+        emailVerified: true,
+      })
+      try {
+        await indexUser({ id: user._id.toString(), name: user.name, email: user.email, updatedAt: user.updatedAt })
+      } catch (_) {}
+    } else {
+      // Link provider info if missing
+      let changed = false
+      if (!user.provider || user.provider === 'local') {
+        // keep local as-is; don't overwrite
+      } else if (user.provider === 'google' && !user.providerId) {
+        user.providerId = providerId
+        changed = true
+      }
+      if (!user.emailVerified) {
+        user.emailVerified = true
+        changed = true
+      }
+      if (picture && !user.avatar) {
+        user.avatar = picture
+        user.markModified('avatar')
+        changed = true
+      }
+      if (user.status === 'pending' || user.status === 'inactive') {
+        user.status = 'active'
+        changed = true
+      }
+      user.lastActiveDate = new Date()
+      if (changed) await user.save()
+      else await user.updateOne({ $set: { lastActiveDate: user.lastActiveDate } })
+      user = await User.findById(user._id)
+    }
+
+    return buildAuthResponse(user)
+  } catch (e) {
+    if (e?.message === 'EMAIL_REQUIRED' || e?.message === 'ACCOUNT_BANNED') throw e
+    throw new Error('SOCIAL_TOKEN_INVALID')
+  }
+}
+
+/**
+ * Social login with Facebook (access token)
+ */
+export const loginWithFacebook = async ({ accessToken }) => {
+  const appId = process.env.FACEBOOK_APP_ID
+  const appSecret = process.env.FACEBOOK_APP_SECRET
+
+  const verifyViaDebug = async () => {
+    if (!appId || !appSecret) return { ok: true }
+    const appAccessToken = `${appId}|${appSecret}`
+    const url = new URL('https://graph.facebook.com/debug_token')
+    url.searchParams.set('input_token', accessToken)
+    url.searchParams.set('access_token', appAccessToken)
+    const r = await fetch(url.toString())
+    const j = await r.json()
+    const data = j?.data
+    if (!r.ok || !data?.is_valid) return { ok: false }
+    if (String(data.app_id || '') !== String(appId)) return { ok: false }
+    return { ok: true }
+  }
+
+  try {
+    const v = await verifyViaDebug()
+    if (!v.ok) throw new Error('SOCIAL_TOKEN_INVALID')
+
+    const meUrl = new URL('https://graph.facebook.com/me')
+    meUrl.searchParams.set('fields', 'id,name,email,picture.type(large)')
+    meUrl.searchParams.set('access_token', accessToken)
+    const meRes = await fetch(meUrl.toString())
+    const me = await meRes.json()
+    const providerId = me?.id ? String(me.id) : ''
+    const email = me?.email ? String(me.email).trim().toLowerCase() : ''
+    const name = me?.name || 'User'
+    const picture = me?.picture?.data?.url
+
+    if (!meRes.ok || !providerId) throw new Error('SOCIAL_TOKEN_INVALID')
+    if (!email) throw new Error('EMAIL_REQUIRED')
+
+    let user = await User.findOne({
+      $or: [{ provider: 'facebook', providerId }, { email }],
+    })
+
+    if (user?.status === 'banned') throw new Error('ACCOUNT_BANNED')
+
+    if (!user) {
+      const randomPassword = crypto.randomBytes(32).toString('hex') + 'Aa1'
+      const hashedPassword = await hashPassword(randomPassword)
+      user = await User.create({
+        email,
+        password: hashedPassword,
+        name,
+        avatar: picture,
+        status: 'active',
+        provider: 'facebook',
+        providerId,
+        emailVerified: true,
+      })
+      try {
+        await indexUser({ id: user._id.toString(), name: user.name, email: user.email, updatedAt: user.updatedAt })
+      } catch (_) {}
+    } else {
+      let changed = false
+      if (user.provider === 'facebook' && !user.providerId) {
+        user.providerId = providerId
+        changed = true
+      }
+      if (!user.emailVerified) {
+        user.emailVerified = true
+        changed = true
+      }
+      if (picture && !user.avatar) {
+        user.avatar = picture
+        user.markModified('avatar')
+        changed = true
+      }
+      if (user.status === 'pending' || user.status === 'inactive') {
+        user.status = 'active'
+        changed = true
+      }
+      user.lastActiveDate = new Date()
+      if (changed) await user.save()
+      else await user.updateOne({ $set: { lastActiveDate: user.lastActiveDate } })
+      user = await User.findById(user._id)
+    }
+
+    return buildAuthResponse(user)
+  } catch (e) {
+    if (e?.message === 'EMAIL_REQUIRED' || e?.message === 'ACCOUNT_BANNED') throw e
+    throw new Error('SOCIAL_TOKEN_INVALID')
+  }
 }
 
 /**
