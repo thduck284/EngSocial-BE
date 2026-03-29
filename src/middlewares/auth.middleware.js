@@ -27,10 +27,10 @@ export const auth = async (req, res, next) => {
 }
 
 /**
- * Require admin or moderator role - must use after auth()
- * Cho phép thêm/sửa/xóa lesson, practice, quest, upload.
+ * Require admin or moderator — dùng cho lesson, practice, upload, word-scramble, tạo skill.
+ * Phải gọi sau auth().
  */
-export const requireAdmin = async (req, res, next) => {
+export const requireModeratorOrAdmin = async (req, res, next) => {
   try {
     const user = await User.findById(req.userId).select('role').lean()
     if (!user || !['admin', 'moderator'].includes(user.role)) {

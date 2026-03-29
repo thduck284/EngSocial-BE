@@ -20,20 +20,6 @@ export class NotificationDTO extends BaseDTO {
   }
 }
 
-export class ActivityLogDTO extends BaseDTO {
-  constructor(log) {
-    super({
-      id: log._id?.toString() || log.id,
-      userId: log.userId?.toString(),
-      action: log.action,
-      entityType: log.entityType,
-      entityId: log.entityId?.toString(),
-      metadata: log.metadata,
-      xpChange: log.xpChange,
-      createdAt: log.createdAt,
-    })
-  }
-}
 
 export class ChatbotConversationDTO extends BaseDTO {
   constructor(conversation) {

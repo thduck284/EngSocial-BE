@@ -20,8 +20,13 @@ function normalizeCondition(body = {}) {
  */
 export const getQuests = async (req, res, next) => {
   try {
-    const { type, status = 'active' } = req.query
-    const filter = { status }
+    const { type, status } = req.query
+    const filter = {}
+    if (status === 'all' || status === '*') {
+      /* staff list: mọi trạng thái */
+    } else {
+      filter.status = status || 'active'
+    }
     if (type) filter.type = type
     const docs = await Quest.find(filter)
       .sort({ order: 1, createdAt: -1 })

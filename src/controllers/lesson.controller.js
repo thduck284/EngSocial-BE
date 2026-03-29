@@ -459,7 +459,7 @@ export const getLessonProgress = async (req, res, next) => {
       progress: progress?.progress,
       score: progress?.score,
       maxScore: progress?.maxScore,
-      answers: progress?.answers || [],
+      answers: progress?.attemptHistory?.[(progress?.attemptHistory?.length || 1) - 1]?.answers || [],
       xpEarned: progress?.xpEarned,
       attempts: progress?.attempts || 0,
       attemptHistory: progress?.attemptHistory || [],
@@ -601,18 +601,22 @@ export const submitLessonAnswers = async (req, res, next) => {
 /**
  * Submit writing lesson
  * POST /api/lessons/:id/submit-writing (auth)
- * Body: { content, wordCount? }
+ * Body: { content, wordCount?, timeSpent? } — timeSpent: giây trên trang bài học
  */
 export const submitWritingLesson = async (req, res, next) => {
   try {
     const { id } = req.params
-    const { content = '', wordCount } = req.body || {}
+    const { content = '', wordCount, timeSpent = 0 } = req.body || {}
     const filter = mongoose.isValidObjectId(id) ? { _id: id } : { slug: id }
     const lesson = await Lesson.findOne(filter).select('_id').lean()
     if (!lesson) {
       return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
     }
-    const progress = await lessonService.submitWriting(req.userId, lesson._id.toString(), { content, wordCount })
+    const progress = await lessonService.submitWriting(req.userId, lesson._id.toString(), {
+      content,
+      wordCount,
+      timeSpent,
+    })
     return sendSuccess(res, { data: progress }, req)
   } catch (error) {
     next(error)

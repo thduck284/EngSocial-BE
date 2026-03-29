@@ -1,4 +1,6 @@
 import * as gameService from '../services/game.service.js'
+import * as matchmakingService from '../services/matchmaking.service.js'
+import { User } from '../models/index.js'
 import { sendSuccess, sendError, sendPaginated } from '../dto/index.js'
 
 export const getGames = async (req, res, next) => {
@@ -85,6 +87,25 @@ export const getUserHistory = async (req, res, next) => {
       messageKey: 'game.historySuccess',
       data: result.sessions,
       pagination: result.pagination,
+    }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const testMatchmaking = async (req, res, next) => {
+  try {
+    const { partySize = 4, queueUserIds = [] } = req.body
+    let finalQueue = queueUserIds
+    if (!finalQueue.length) {
+      const others = await User.find({ _id: { $ne: req.userId } }).limit(5).select('_id').lean()
+      finalQueue = others.map(u => u._id.toString())
+    }
+
+    const result = await matchmakingService.callMatchmakingAI(req.userId, finalQueue, partySize)
+    return sendSuccess(res, {
+      messageKey: 'game.matchmakingTestSuccess',
+      data: result,
     }, req)
   } catch (error) {
     next(error)

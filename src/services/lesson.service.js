@@ -179,7 +179,6 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent }) =>
   const progressPercent = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0
   const passedRewardThreshold = progressPercent >= 80
 
-  progress.answers = gradedAnswers
   progress.score = score
   progress.maxScore = maxScore
   progress.progress = progressPercent
@@ -240,7 +239,7 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent }) =>
 /**
  * Submit writing for a lesson
  */
-export const submitWriting = async (userId, lessonId, { content, wordCount }) => {
+export const submitWriting = async (userId, lessonId, { content, wordCount, timeSpent = 0 }) => {
   const lesson = await Lesson.findById(lessonId)
   if (!lesson || lesson.skill !== 'writing') throw new Error('LESSON_NOT_FOUND')
 
@@ -273,6 +272,8 @@ export const submitWriting = async (userId, lessonId, { content, wordCount }) =>
 
   progress.attempts = (progress.attempts || 0) + 1
   const attemptNo = progress.attempts
+  const ts = Number(timeSpent) || 0
+  progress.timeSpent = (progress.timeSpent || 0) + ts
   progress.attemptHistory = progress.attemptHistory || []
   progress.attemptHistory.push({
     type: 'writing',
@@ -280,12 +281,21 @@ export const submitWriting = async (userId, lessonId, { content, wordCount }) =>
     submittedAt: new Date(),
     progress: 100,
     xpEarned,
+    timeSpent: ts,
     submission: {
       content,
       wordCount: wordCount || content.split(/\s+/).length,
     },
   })
   await progress.save()
+
+  await updateSkillStats(userId, 'writing', {
+    score: 100,
+    maxScore: 100,
+    xpEarned,
+    timeSpent: ts,
+  })
+
   return new UserLessonProgressDTO(progress)
 }
 
@@ -372,10 +382,12 @@ const updateSkillStats = async (userId, skill, { score, maxScore, xpEarned, time
     })
   }
 
+  // Body/API dùng giây (khớp UserLessonProgress.timeSpent); UserSkillStats lưu phút
+  const minutesToAdd = (Number(timeSpent) || 0) / 60
   stats.lessonsCompleted += 1
-  stats.totalTimeSpent += timeSpent
-  stats.dailyTimeSpent += timeSpent
-  stats.weeklyTimeSpent += timeSpent
+  stats.totalTimeSpent += minutesToAdd
+  stats.dailyTimeSpent += minutesToAdd
+  stats.weeklyTimeSpent += minutesToAdd
   stats.totalXpEarned += xpEarned
   const pct = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0
   stats.averageScore = Math.round(

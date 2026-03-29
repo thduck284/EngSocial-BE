@@ -1,10 +1,11 @@
 import mongoose from 'mongoose'
 import { verifyToken } from '../utils/jwt.js'
 import { Conversation } from '../models/index.js'
+import { registerWordScrambleLobbyHandlers } from '../sockets/wordScrambleLobby.js'
 
 const corsOrigin = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
-  : ['https://eng-social-fe.vercel.app', 'http://localhost:3000']
+  ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
+  : '*'
 
 export const socketOptions = {
   cors: {
@@ -80,6 +81,7 @@ export function setupSocket(io) {
   }
 
   io.on('connection', (socket) => {
+    registerWordScrambleLobbyHandlers(io, socket)
     if (socket.userId) {
       registerUserSocket(socket.userId, socket.id)
       getConversationPartnerIds(socket.userId).then((partnerIds) => {

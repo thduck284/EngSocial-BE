@@ -10,5 +10,6 @@ router.get('/:id', gameController.getGameById)
 router.post('/', auth, gameController.createGame)
 router.post('/:id/start', auth, gameController.startSession)
 router.post('/sessions/:sessionId/submit', auth, gameController.submitSession)
+router.post('/matchmaking/test', auth, gameController.testMatchmaking)
 
 export default router

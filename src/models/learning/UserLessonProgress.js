@@ -50,7 +50,6 @@ const userLessonProgressSchema = new mongoose.Schema({
   progress: { type: Number, default: 0, min: 0, max: 100 },
   currentPosition: Number, // For audio/video
   currentChapter: String,
-  answers: [answerSchema],
   submission: {
     content: String,
     wordCount: Number,

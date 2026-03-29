@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import * as skillController from '../../controllers/skill.controller.js'
 import { auth } from '../../middlewares/auth.middleware.js'
+import { requireModeratorOrAdmin } from '../../middlewares/index.js'
 
 const router = Router()
 
@@ -23,6 +24,6 @@ router.get('/:key', skillController.getSkillByKey)
  * @desc    Create skill (admin)
  * @access  Private
  */
-router.post('/', auth, skillController.createSkill)
+router.post('/', auth, requireModeratorOrAdmin, skillController.createSkill)
 
 export default router

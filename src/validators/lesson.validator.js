@@ -83,4 +83,5 @@ export const submitAnswersSchema = Joi.object({
 export const submitWritingSchema = Joi.object({
   content: Joi.string().required().min(1),
   wordCount: Joi.number().integer(),
+  timeSpent: Joi.number().integer().min(0),
 })

@@ -11,16 +11,14 @@ import { ensureConnected } from './config/db.js'
 
 const app = express()
 
-const DEFAULT_CORS = ['https://eng-social-fe.vercel.app', 'http://localhost:3000']
-const FROM_ENV = process.env.CORS_ORIGIN
+const CORS_ORIGINS = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
   : []
-const CORS_ORIGINS = [...new Set([...DEFAULT_CORS, ...FROM_ENV])]
 
 function corsOrigin(origin) {
-  if (!origin) return CORS_ORIGINS[0]
-  if (CORS_ORIGINS.includes(origin)) return origin
-  return CORS_ORIGINS[0]
+  if (!origin) return CORS_ORIGINS[0] || '*'
+  if (CORS_ORIGINS.includes(origin) || CORS_ORIGINS.includes('*')) return origin
+  return CORS_ORIGINS[0] || '*'
 }
 
 // Set CORS headers on every response (so 4xx/5xx and preflight always have them)
@@ -119,6 +117,7 @@ app.get('/api', (req, res) => {
       user: '/api/user',
       lessons: '/api/lessons',
       vocabulary: '/api/vocabulary',
+      wordScramble: '/api/word-scramble',
       practices: '/api/practices',
       quests: '/api/quests',
       skills: '/api/skills',
