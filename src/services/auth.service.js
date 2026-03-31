@@ -404,7 +404,8 @@ export const forgotPassword = async (email, lang = 'vi') => {
     expiresAt,
   })
 
-  const baseUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '')
+  const corsOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()).filter(Boolean) : []
+  const baseUrl = (corsOrigins[0] || '').replace(/\/$/, '')
   const resetLink = `${baseUrl}/reset-password?token=${token}`
 
   const { sendPasswordResetEmail } = await import('./email.service.js')

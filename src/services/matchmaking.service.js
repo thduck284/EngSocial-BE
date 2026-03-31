@@ -83,7 +83,8 @@ export const callMatchmakingAI = async (hostId, queueUserIds, partySize) => {
   }
 
   try {
-    const response = await fetch('http://localhost:5001/api/matchmake', {
+    const aiUrl = process.env.AI_MATCHMAKING_URL
+    const response = await fetch(aiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
