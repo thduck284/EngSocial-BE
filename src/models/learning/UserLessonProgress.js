@@ -2,6 +2,7 @@ import mongoose from 'mongoose'
 
 const answerSchema = new mongoose.Schema({
   questionId: String,
+  questionIndex: Number,
   answer: mongoose.Schema.Types.Mixed,
   isCorrect: Boolean,
   answeredAt: Date,
@@ -12,6 +13,22 @@ const noteSchema = new mongoose.Schema({
   content: { type: String, default: '' },
   category: { type: String, enum: ['grammar', 'vocab', 'idea'], default: 'grammar' },
   createdAt: { type: Date, default: Date.now },
+}, { _id: false })
+
+const attemptHistorySchema = new mongoose.Schema({
+  type: { type: String, enum: ['quiz', 'writing'], required: true },
+  attemptNo: { type: Number, required: true },
+  submittedAt: { type: Date, default: Date.now },
+  score: Number,
+  maxScore: Number,
+  progress: Number,
+  xpEarned: { type: Number, default: 0 },
+  timeSpent: Number,
+  answers: [answerSchema],
+  submission: {
+    content: String,
+    wordCount: Number,
+  },
 }, { _id: false })
 
 const userLessonProgressSchema = new mongoose.Schema({
@@ -33,7 +50,6 @@ const userLessonProgressSchema = new mongoose.Schema({
   progress: { type: Number, default: 0, min: 0, max: 100 },
   currentPosition: Number, // For audio/video
   currentChapter: String,
-  answers: [answerSchema],
   submission: {
     content: String,
     wordCount: Number,
@@ -51,6 +67,7 @@ const userLessonProgressSchema = new mongoose.Schema({
   completedAt: Date,
   lastAccessedAt: Date,
   notes: [noteSchema],
+  attemptHistory: [attemptHistorySchema],
 }, { timestamps: true })
 
 userLessonProgressSchema.index({ userId: 1, lessonId: 1 }, { unique: true })

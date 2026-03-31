@@ -68,6 +68,7 @@ export const getPosts = async ({ visibility, groupId, authorId, search, page = 1
   const total = await Post.countDocuments(filter)
   const posts = await Post.find(filter)
     .populate('authorId', 'name avatar level totalXp')
+    .populate('groupId', 'name icon type')
     .populate('mentions', 'name avatar')
     .populate({
       path: 'sharedPostId',
@@ -119,6 +120,7 @@ export const getPosts = async ({ visibility, groupId, authorId, search, page = 1
 export const getPostById = async (postId, viewerId = null) => {
   const post = await Post.findById(postId)
     .populate('authorId', 'name avatar level totalXp')
+    .populate('groupId', 'name icon type')
     .populate('mentions', 'name avatar')
     .populate({
       path: 'sharedPostId',
@@ -181,8 +183,21 @@ export const createPost = async (userId, data) => {
     sharedPostId: data.sharedPostId || null,
   })
 
+  if (data.sharedPostId) {
+    const sid = String(data.sharedPostId).trim()
+    if (mongoose.Types.ObjectId.isValid(sid)) {
+      await Post.findOneAndUpdate(
+        { _id: new mongoose.Types.ObjectId(sid), status: { $ne: 'deleted' } },
+        { $inc: { shareCount: 1 } }
+      )
+    }
+  }
+
   const author = await User.findById(userId).select('name avatar level totalXp')
-  const populated = await Post.findById(post._id).populate('mentions', 'name avatar').lean()
+  const populated = await Post.findById(post._id)
+    .populate('mentions', 'name avatar')
+    .populate('groupId', 'name icon type')
+    .lean()
   return new PostDetailDTO({ ...post.toObject(), mentions: populated?.mentions ?? post.mentions }, author)
 }
 
@@ -196,7 +211,9 @@ export const updatePost = async (userId, postId, data) => {
 
   if (data.content !== undefined) post.content = data.content
   if (data.images !== undefined) post.images = data.images
-  if (data.video !== undefined) post.video = data.video
+  if (data.video !== undefined) {
+    post.video = typeof data.video === 'string' && data.video.trim() ? data.video.trim() : null
+  }
   if (data.documents !== undefined) post.documents = normalizeDocuments(data.documents)
   if (data.visibility !== undefined) post.visibility = data.visibility
   if (data.tags !== undefined) {
@@ -216,7 +233,10 @@ export const updatePost = async (userId, postId, data) => {
   await post.save()
 
   const author = await User.findById(userId).select('name avatar level totalXp')
-  const populated = await Post.findById(post._id).populate('mentions', 'name avatar').lean()
+  const populated = await Post.findById(post._id)
+    .populate('mentions', 'name avatar')
+    .populate('groupId', 'name icon type')
+    .lean()
   return new PostDetailDTO({ ...post.toObject(), mentions: populated?.mentions ?? post.mentions }, author)
 }
 

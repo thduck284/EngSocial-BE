@@ -5,11 +5,17 @@ import { getPagination, getPaginationQuery } from '../utils/index.js'
 /**
  * Get active challenges
  */
-export const getChallenges = async ({ type, skill, status = 'active', page = 1, limit = 10 }) => {
+export const getChallenges = async ({ type, skill, status, page = 1, limit = 10 }) => {
   const filter = {}
   if (type) filter.type = type
   if (skill) filter.skill = skill
-  if (status) filter.status = status
+  if (status === 'all' || status === '*') {
+    /* staff list: mọi trạng thái */
+  } else if (status) {
+    filter.status = status
+  } else {
+    filter.status = 'active'
+  }
 
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
   const total = await Challenge.countDocuments(filter)

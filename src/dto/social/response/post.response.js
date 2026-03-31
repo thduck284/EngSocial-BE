@@ -47,6 +47,7 @@ export class GroupMemberDTO extends BaseDTO {
       role: member.role,
       status: member.status,
       joinedAt: member.joinedAt,
+      invitedBy: member.invitedBy != null ? member.invitedBy.toString?.() || String(member.invitedBy) : undefined,
     })
   }
 }
@@ -93,12 +94,32 @@ function mapDocuments(docs) {
   })
 }
 
+function mapGroup(group) {
+  if (!group || typeof group !== 'object') return null
+  const id = group._id?.toString?.() || group.id?.toString?.()
+  if (!id) return null
+  return {
+    id,
+    name: group.name || '',
+    icon: group.icon || '',
+    type: group.type || '',
+  }
+}
+
+function mapGroupId(groupId) {
+  if (!groupId) return undefined
+  if (typeof groupId === 'string') return groupId
+  if (typeof groupId === 'object') return groupId._id?.toString?.() || groupId.id?.toString?.()
+  return undefined
+}
+
 export class PostDTO extends BaseDTO {
   constructor(post) {
     super({
       id: post._id?.toString() || post.id,
       authorId: post.authorId?.toString(),
-      groupId: post.groupId?.toString(),
+      groupId: mapGroupId(post.groupId),
+      group: mapGroup(post.groupId),
       content: post.content,
       images: post.images,
       video: post.video,
@@ -124,7 +145,8 @@ export class PostDetailDTO extends BaseDTO {
     super({
       id: post._id?.toString() || post.id,
       author: author ? new UserProfileDTO(author) : null,
-      groupId: post.groupId?.toString(),
+      groupId: mapGroupId(post.groupId),
+      group: mapGroup(post.groupId),
       content: post.content,
       images: post.images,
       video: post.video,

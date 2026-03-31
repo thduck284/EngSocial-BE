@@ -1,14 +1,32 @@
 import Quest from '../models/gamification/Quest.js'
 import { sendSuccess, sendError } from '../dto/index.js'
 
+function normalizeCondition(body = {}) {
+  const conditionBody = body.condition || {}
+  return {
+    target: conditionBody.target ?? body.targetValue ?? 1,
+    filters: {
+      skill: conditionBody.filters?.skill ?? body.skill ?? 'all',
+      category: conditionBody.filters?.category ?? 'all',
+      minProgress: conditionBody.filters?.minProgress ?? 100,
+      minScorePercent: conditionBody.filters?.minScorePercent ?? 0,
+    },
+  }
+}
+
 /**
  * Get quests list - from DB
  * GET /api/quests?type=daily&status=active
  */
 export const getQuests = async (req, res, next) => {
   try {
-    const { type, status = 'active' } = req.query
-    const filter = { status }
+    const { type, status } = req.query
+    const filter = {}
+    if (status === 'all' || status === '*') {
+      /* staff list: mọi trạng thái */
+    } else {
+      filter.status = status || 'active'
+    }
     if (type) filter.type = type
     const docs = await Quest.find(filter)
       .sort({ order: 1, createdAt: -1 })
@@ -47,15 +65,14 @@ export const getQuestById = async (req, res, next) => {
 export const createQuest = async (req, res, next) => {
   try {
     const body = req.body
+    const condition = normalizeCondition(body)
     const payload = {
       title: body.title,
       description: body.description ?? '',
       type: body.type || 'daily',
-      targetType: body.targetType || 'lesson',
-      targetValue: body.targetValue ?? 1,
+      condition,
       xpReward: body.xpReward ?? 50,
       icon: body.icon || 'flag',
-      skill: body.skill || 'all',
       status: body.status || 'active',
       order: body.order ?? 0,
     }
@@ -72,9 +89,17 @@ export const createQuest = async (req, res, next) => {
  */
 export const updateQuest = async (req, res, next) => {
   try {
+    const body = { ...req.body }
+    if (body.condition || body.targetValue != null || body.skill) {
+      body.condition = normalizeCondition(body)
+    }
+    delete body.targetType
+    delete body.targetValue
+    delete body.skill
+    if (body.condition && body.condition.type) delete body.condition.type
     const quest = await Quest.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      body,
       { new: true, runValidators: true }
     ).lean()
     if (!quest) {

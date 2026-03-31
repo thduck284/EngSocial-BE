@@ -5,6 +5,8 @@ import { auth } from '../../middlewares/auth.middleware.js'
 import {
   registerSchema,
   loginSchema,
+  googleLoginSchema,
+  facebookLoginSchema,
   refreshTokenSchema,
   updatePreferencesSchema,
   forgotPasswordSchema,
@@ -26,6 +28,20 @@ router.post('/register', validate(registerSchema), authController.register)
  * @access  Public
  */
 router.post('/login', validate(loginSchema), authController.login)
+
+/**
+ * @route   POST /api/auth/social/google
+ * @desc    Login/register with Google (ID token)
+ * @access  Public
+ */
+router.post('/social/google', validate(googleLoginSchema), authController.loginWithGoogle)
+
+/**
+ * @route   POST /api/auth/social/facebook
+ * @desc    Login/register with Facebook (access token)
+ * @access  Public
+ */
+router.post('/social/facebook', validate(facebookLoginSchema), authController.loginWithFacebook)
 
 /**
  * @route   POST /api/auth/refresh

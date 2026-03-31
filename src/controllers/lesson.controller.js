@@ -166,7 +166,7 @@ export const createLesson = async (req, res, next) => {
       estimatedTime: body.estimatedTime,
       xpReward: body.xpReward ?? 50,
       totalQuestions: body.totalQuestions ?? 0,
-      status: body.status || 'draft',
+      status: 'published',
       featured: body.featured ?? false,
       time: body.time,
       accent: content.accent ?? body.accent,
@@ -199,7 +199,7 @@ export const updateLesson = async (req, res, next) => {
     const allowed = [
       'title', 'slug', 'skill', 'level', 'category', 'topic', 'description', 'thumbnail',
       'content', 'questions', 'vocabulary', 'estimatedTime', 'xpReward', 'totalQuestions',
-      'status', 'featured', 'time', 'accent', 'practiceType', 'length', 'order', 'tags',
+      'featured', 'time', 'accent', 'practiceType', 'length', 'order', 'tags',
     ]
     for (const key of allowed) {
       if (body[key] !== undefined) {
@@ -457,6 +457,12 @@ export const getLessonProgress = async (req, res, next) => {
       notes: progress?.notes || [],
       status: progress?.status,
       progress: progress?.progress,
+      score: progress?.score,
+      maxScore: progress?.maxScore,
+      answers: progress?.attemptHistory?.[(progress?.attemptHistory?.length || 1) - 1]?.answers || [],
+      xpEarned: progress?.xpEarned,
+      attempts: progress?.attempts || 0,
+      attemptHistory: progress?.attemptHistory || [],
     }
     return sendSuccess(res, { data }, req)
   } catch (error) {
@@ -503,52 +509,6 @@ export const addLessonNote = async (req, res, next) => {
 }
 
 /**
- * Update lesson progress (e.g. save draft = in_progress)
- * PATCH /api/lessons/:id/progress (auth)
- * Body: { status?: 'in_progress' | 'completed', progress?: number }
- */
-export const updateLessonProgress = async (req, res, next) => {
-  try {
-    const { id } = req.params
-    const { status = 'in_progress', progress: progressPercent } = req.body || {}
-    const filter = mongoose.isValidObjectId(id) ? { _id: id } : { slug: id }
-    const lesson = await Lesson.findOne(filter).select('_id').lean()
-    if (!lesson) {
-      return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
-    }
-    let progress = await UserLessonProgress.findOne({
-      userId: req.userId,
-      lessonId: lesson._id,
-    })
-    const now = new Date()
-    if (!progress) {
-      progress = await UserLessonProgress.create({
-        userId: req.userId,
-        lessonId: lesson._id,
-        status: status === 'completed' ? 'completed' : 'in_progress',
-        progress: progressPercent != null ? progressPercent : (status === 'completed' ? 100 : 0),
-        completedAt: status === 'completed' ? now : undefined,
-        lastAccessedAt: now,
-        startedAt: now,
-        notes: [],
-      })
-    } else {
-      progress.status = status === 'completed' ? 'completed' : 'in_progress'
-      if (progressPercent != null) progress.progress = progressPercent
-      if (status === 'completed') {
-        progress.completedAt = now
-      }
-      progress.lastAccessedAt = now
-      await progress.save()
-    }
-    const data = { status: progress.status, progress: progress.progress }
-    return sendSuccess(res, { data }, req)
-  } catch (error) {
-    next(error)
-  }
-}
-
-/**
  * Mark lesson as completed for the current user
  * POST /api/lessons/:id/complete (auth)
  * Luu v�o UserLessonProgress: status = 'completed', progress = 100, completedAt = now
@@ -566,6 +526,11 @@ export const completeLesson = async (req, res, next) => {
       lessonId: lesson._id,
     })
     const now = new Date()
+    const currentScore = progress?.score || 0
+    const currentMaxScore = progress?.maxScore || 0
+    const currentPercent = currentMaxScore > 0 ? Math.round((currentScore / currentMaxScore) * 100) : 0
+    const eligibleForReward = currentPercent >= 80
+    const xpThisAction = eligibleForReward ? (lesson.xpReward ?? 50) : 0
     if (!progress) {
       progress = await UserLessonProgress.create({
         userId: req.userId,
@@ -575,7 +540,7 @@ export const completeLesson = async (req, res, next) => {
         completedAt: now,
         lastAccessedAt: now,
         startedAt: now,
-        xpEarned: lesson.xpReward ?? 50,
+        xpEarned: xpThisAction,
         notes: [],
       })
     } else {
@@ -583,7 +548,9 @@ export const completeLesson = async (req, res, next) => {
       progress.progress = 100
       progress.completedAt = now
       progress.lastAccessedAt = now
-      if (progress.xpEarned == null) progress.xpEarned = lesson.xpReward ?? 50
+      if (eligibleForReward) {
+        progress.xpEarned = (progress.xpEarned || 0) + (lesson.xpReward ?? 50)
+      }
       await progress.save()
     }
     const data = {
@@ -591,8 +558,66 @@ export const completeLesson = async (req, res, next) => {
       progress: progress.progress,
       completedAt: progress.completedAt,
       xpEarned: progress.xpEarned,
+      xpEarnedThisAttempt: xpThisAction,
+      rewardEligible: eligibleForReward,
     }
     return sendSuccess(res, { data }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * Submit answers for reading/listening lesson
+ * POST /api/lessons/:id/submit (auth)
+ * Body: { answers: [{ questionId, questionIndex, answer }], timeSpent? }
+ */
+export const submitLessonAnswers = async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const { answers = [], timeSpent = 0 } = req.body || {}
+    const filter = mongoose.isValidObjectId(id) ? { _id: id } : { slug: id }
+    const lesson = await Lesson.findOne(filter).select('_id').lean()
+    if (!lesson) {
+      return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
+    }
+    const progress = await lessonService.submitAnswers(req.userId, lesson._id.toString(), { answers, timeSpent })
+    const latest = await UserLessonProgress.findOne({
+      userId: req.userId,
+      lessonId: lesson._id,
+    }).select('attemptHistory').lean()
+    const lastAttempt = latest?.attemptHistory?.[latest.attemptHistory.length - 1]
+    const data = {
+      ...progress,
+      xpEarnedThisAttempt: lastAttempt?.xpEarned ?? 0,
+      rewardEligible: (lastAttempt?.progress ?? 0) >= 80,
+    }
+    return sendSuccess(res, { data }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * Submit writing lesson
+ * POST /api/lessons/:id/submit-writing (auth)
+ * Body: { content, wordCount?, timeSpent? } — timeSpent: giây trên trang bài học
+ */
+export const submitWritingLesson = async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const { content = '', wordCount, timeSpent = 0 } = req.body || {}
+    const filter = mongoose.isValidObjectId(id) ? { _id: id } : { slug: id }
+    const lesson = await Lesson.findOne(filter).select('_id').lean()
+    if (!lesson) {
+      return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
+    }
+    const progress = await lessonService.submitWriting(req.userId, lesson._id.toString(), {
+      content,
+      wordCount,
+      timeSpent,
+    })
+    return sendSuccess(res, { data: progress }, req)
   } catch (error) {
     next(error)
   }

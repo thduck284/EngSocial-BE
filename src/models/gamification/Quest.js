@@ -11,15 +11,17 @@ const questSchema = new mongoose.Schema({
     enum: ['daily', 'weekly', 'one_time'],
     default: 'daily',
   },
-  targetType: { type: String, enum: ['lesson', 'practice_skill', 'both'], default: 'lesson' },
-  targetValue: { type: Number, required: true },
+  condition: {
+    target: { type: Number, required: true, min: 1, default: 1 },
+    filters: {
+      skill: { type: String, enum: ['reading', 'listening', 'writing', 'all'], default: 'all' },
+      category: { type: String, enum: ['lesson', 'practice', 'all'], default: 'all' },
+      minProgress: { type: Number, min: 0, max: 100, default: 100 },
+      minScorePercent: { type: Number, min: 0, max: 100, default: 0 },
+    },
+  },
   xpReward: { type: Number, default: 50 },
   icon: { type: String, default: 'flag' },
-  skill: {
-    type: String,
-    enum: ['reading', 'listening', 'writing', 'all'],
-    default: 'all',
-  },
   status: {
     type: String,
     enum: ['active', 'archived'],

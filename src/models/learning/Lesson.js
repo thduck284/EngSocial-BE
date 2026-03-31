@@ -107,8 +107,8 @@ const lessonSchema = new mongoose.Schema({
   
   status: {
     type: String,
-    enum: ['draft', 'published', 'archived'],
-    default: 'draft',
+    enum: ['published'],
+    default: 'published',
   },
   featured: { type: Boolean, default: false },
   // Practice-specific (cho category=practice)

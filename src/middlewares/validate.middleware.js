@@ -15,6 +15,12 @@ export const validate = (schema) => {
         field: detail.path.join('.'),
         message: detail.message,
       }))
+      console.warn('[ValidationFailed]', {
+        method: req.method,
+        url: req.originalUrl,
+        errors,
+        body: req.body,
+      })
 
       return sendError(res, {
         statusCode: 400,

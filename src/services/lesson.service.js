@@ -138,9 +138,23 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent }) =>
 
   // Grade answers
   let score = 0
-  const gradedAnswers = answers.map(a => {
-    const question = lesson.questions.find(q => q.id === a.questionId)
-    if (!question) return { ...a, isCorrect: false, answeredAt: new Date() }
+  const gradedAnswers = answers.map((a, idx) => {
+    const qIndex =
+      Number.isInteger(a.questionIndex)
+        ? a.questionIndex
+        : Number.isInteger(Number(a.questionId))
+          ? Number(a.questionId) - 1
+          : idx
+    const question = lesson.questions[qIndex] || lesson.questions.find((q) => String(q.id) === String(a.questionId))
+    if (!question) {
+      return {
+        questionId: String(a.questionId ?? question?.id ?? qIndex + 1),
+        questionIndex: qIndex,
+        answer: a.answer,
+        isCorrect: false,
+        answeredAt: new Date(),
+      }
+    }
 
     let isCorrect = false
     if (Array.isArray(question.correctAnswer)) {
@@ -152,44 +166,71 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent }) =>
     }
 
     if (isCorrect) score += (question.points || 10)
-    return { questionId: a.questionId, answer: a.answer, isCorrect, answeredAt: new Date() }
+    return {
+      questionId: String(a.questionId ?? question.id ?? qIndex + 1),
+      questionIndex: qIndex,
+      answer: a.answer,
+      isCorrect,
+      answeredAt: new Date(),
+    }
   })
 
   const maxScore = lesson.questions.reduce((sum, q) => sum + (q.points || 10), 0)
   const progressPercent = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0
+  const passedRewardThreshold = progressPercent >= 80
 
-  progress.answers = gradedAnswers
   progress.score = score
   progress.maxScore = maxScore
   progress.progress = progressPercent
   progress.timeSpent = (progress.timeSpent || 0) + (timeSpent || 0)
   progress.attempts = (progress.attempts || 0) + 1
+  const attemptNo = progress.attempts
   if (score > progress.bestScore) progress.bestScore = score
   progress.lastAccessedAt = new Date()
+  let xpEarnedThisAttempt = 0
 
   // Mark complete if answered all questions
   if (gradedAnswers.length >= lesson.questions.length) {
     progress.status = 'completed'
     progress.completedAt = new Date()
 
-    // Award XP
-    const xpEarned = lesson.xpReward || 50
-    progress.xpEarned = (progress.xpEarned || 0) + xpEarned
+    if (passedRewardThreshold) {
+      const xpEarned = lesson.xpReward || 50
+      xpEarnedThisAttempt = xpEarned
+      progress.xpEarned = (progress.xpEarned || 0) + xpEarned
 
-    // Update user XP
-    await User.findByIdAndUpdate(userId, {
-      $inc: { xp: xpEarned, totalXp: xpEarned },
-      lastActiveDate: new Date(),
-    })
+      await User.findByIdAndUpdate(userId, {
+        $inc: { xp: xpEarned, totalXp: xpEarned },
+        lastActiveDate: new Date(),
+      })
+    }
 
     // Update lesson completion count
     if (progress.attempts === 1) {
       await Lesson.findByIdAndUpdate(lessonId, { $inc: { completionCount: 1 } })
     }
 
-    // Update skill stats
-    await updateSkillStats(userId, lesson.skill, { score, maxScore, xpEarned, timeSpent: timeSpent || 0 })
+    // Still update stats on completion, but reward XP only when >= 80%
+    await updateSkillStats(userId, lesson.skill, {
+      score,
+      maxScore,
+      xpEarned: xpEarnedThisAttempt,
+      timeSpent: timeSpent || 0,
+    })
   }
+
+  progress.attemptHistory = progress.attemptHistory || []
+  progress.attemptHistory.push({
+    type: 'quiz',
+    attemptNo,
+    submittedAt: new Date(),
+    score,
+    maxScore,
+    progress: progressPercent,
+    xpEarned: xpEarnedThisAttempt,
+    timeSpent: timeSpent || 0,
+    answers: gradedAnswers,
+  })
 
   await progress.save()
   return new UserLessonProgressDTO(progress)
@@ -198,7 +239,7 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent }) =>
 /**
  * Submit writing for a lesson
  */
-export const submitWriting = async (userId, lessonId, { content, wordCount }) => {
+export const submitWriting = async (userId, lessonId, { content, wordCount, timeSpent = 0 }) => {
   const lesson = await Lesson.findById(lessonId)
   if (!lesson || lesson.skill !== 'writing') throw new Error('LESSON_NOT_FOUND')
 
@@ -230,7 +271,31 @@ export const submitWriting = async (userId, lessonId, { content, wordCount }) =>
   }
 
   progress.attempts = (progress.attempts || 0) + 1
+  const attemptNo = progress.attempts
+  const ts = Number(timeSpent) || 0
+  progress.timeSpent = (progress.timeSpent || 0) + ts
+  progress.attemptHistory = progress.attemptHistory || []
+  progress.attemptHistory.push({
+    type: 'writing',
+    attemptNo,
+    submittedAt: new Date(),
+    progress: 100,
+    xpEarned,
+    timeSpent: ts,
+    submission: {
+      content,
+      wordCount: wordCount || content.split(/\s+/).length,
+    },
+  })
   await progress.save()
+
+  await updateSkillStats(userId, 'writing', {
+    score: 100,
+    maxScore: 100,
+    xpEarned,
+    timeSpent: ts,
+  })
+
   return new UserLessonProgressDTO(progress)
 }
 
@@ -243,21 +308,47 @@ export const getUserProgress = async (userId, { skill, status, category, page = 
 
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
 
-  let query = UserLessonProgress.find(filter).populate('lessonId')
-  const allProgress = await query.sort({ lastAccessedAt: -1 }).skip(skip).limit(perPage)
+  const allProgress = await UserLessonProgress.find(filter)
+    .populate('lessonId')
+    .sort({ lastAccessedAt: -1 })
 
   // Filter by skill and category after populate
   let filtered = allProgress
   if (skill) filtered = filtered.filter(p => p.lessonId?.skill === skill)
   if (category) filtered = filtered.filter(p => p.lessonId?.category === category)
 
-  const total = await UserLessonProgress.countDocuments(filter)
-
-  return {
-    progress: filtered.map(p => ({
+  // Expand completed attempts so one lesson can show many results in history.
+  const expanded = filtered.flatMap((p) => {
+    const base = {
       ...new UserLessonProgressDTO(p),
       lesson: p.lessonId ? new LessonDTO(p.lessonId) : null,
-    })),
+    }
+    const attempts = Array.isArray(p.attemptHistory) ? p.attemptHistory : []
+    if (attempts.length === 0) return [base]
+    return attempts.map((a) => ({
+      ...base,
+      id: `${base.id}-attempt-${a.attemptNo || 0}`,
+      status: 'completed',
+      progress: a.progress ?? base.progress,
+      score: a.score ?? base.score,
+      maxScore: a.maxScore ?? base.maxScore,
+      xpEarned: a.xpEarned ?? 0,
+      attemptNo: a.attemptNo || 0,
+      submittedAt: a.submittedAt || base.updatedAt,
+    }))
+  })
+
+  expanded.sort((a, b) => {
+    const ta = new Date(a.submittedAt || a.lastAccessedAt || a.updatedAt || 0).getTime()
+    const tb = new Date(b.submittedAt || b.lastAccessedAt || b.updatedAt || 0).getTime()
+    return tb - ta
+  })
+
+  const total = expanded.length
+  const pageItems = expanded.slice(skip, skip + perPage)
+
+  return {
+    progress: pageItems,
     pagination: getPagination({ page, limit: perPage, total }),
   }
 }
@@ -291,10 +382,12 @@ const updateSkillStats = async (userId, skill, { score, maxScore, xpEarned, time
     })
   }
 
+  // Body/API dùng giây (khớp UserLessonProgress.timeSpent); UserSkillStats lưu phút
+  const minutesToAdd = (Number(timeSpent) || 0) / 60
   stats.lessonsCompleted += 1
-  stats.totalTimeSpent += timeSpent
-  stats.dailyTimeSpent += timeSpent
-  stats.weeklyTimeSpent += timeSpent
+  stats.totalTimeSpent += minutesToAdd
+  stats.dailyTimeSpent += minutesToAdd
+  stats.weeklyTimeSpent += minutesToAdd
   stats.totalXpEarned += xpEarned
   const pct = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0
   stats.averageScore = Math.round(

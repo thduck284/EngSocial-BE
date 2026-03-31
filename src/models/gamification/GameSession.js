@@ -24,6 +24,7 @@ const gameSessionSchema = new mongoose.Schema({
   streak: { type: Number, default: 0 },
   xpEarned: { type: Number, default: 0 },
   duration: Number, // seconds
+  partySize: { type: Number, default: 1 },
   answers: [gameAnswerSchema],
   startedAt: { type: Date, default: Date.now },
   endedAt: Date,

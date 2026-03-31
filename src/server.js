@@ -6,7 +6,7 @@ import app from './app.js'
 import connectDB from './config/db.js'
 import { socketOptions, setupSocket } from './config/socket.js'
 
-const PORT = parseInt(process.env.PORT || '5000', 10)
+const PORT = parseInt(process.env.PORT, 10)
 let server = null
 
 function shutdown(signal) {

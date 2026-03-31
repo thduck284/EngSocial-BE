@@ -72,6 +72,28 @@ export const loginSchema = Joi.object({
 })
 
 /**
+ * Social login - Google (ID token)
+ */
+export const googleLoginSchema = Joi.object({
+  idToken: Joi.string()
+    .required()
+    .messages({
+      'any.required': 'idToken là bắt buộc',
+    }),
+})
+
+/**
+ * Social login - Facebook (access token)
+ */
+export const facebookLoginSchema = Joi.object({
+  accessToken: Joi.string()
+    .required()
+    .messages({
+      'any.required': 'accessToken là bắt buộc',
+    }),
+})
+
+/**
  * Refresh token validation schema
  */
 export const refreshTokenSchema = Joi.object({

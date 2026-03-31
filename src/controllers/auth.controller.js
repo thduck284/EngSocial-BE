@@ -59,6 +59,78 @@ export const login = async (req, res, next) => {
 }
 
 /**
+ * Social login with Google
+ * POST /api/auth/social/google
+ */
+export const loginWithGoogle = async (req, res, next) => {
+  try {
+    const { idToken } = req.body
+    const data = await authService.loginWithGoogle({ idToken })
+    return sendSuccess(res, {
+      messageKey: 'auth.loginSuccess',
+      data,
+    }, req)
+  } catch (error) {
+    if (error.message === 'ACCOUNT_BANNED') {
+      return sendError(res, {
+        statusCode: 403,
+        messageKey: 'auth.accountBanned',
+      }, req)
+    }
+    if (error.message === 'SOCIAL_TOKEN_INVALID') {
+      return sendError(res, {
+        statusCode: 401,
+        messageKey: 'auth.invalidCredentials',
+      }, req)
+    }
+    if (error.message === 'EMAIL_REQUIRED') {
+      return sendError(res, {
+        statusCode: 400,
+        messageKey: 'common.validationFailed',
+        errors: [{ field: 'email', message: 'Email là bắt buộc' }],
+      }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Social login with Facebook
+ * POST /api/auth/social/facebook
+ */
+export const loginWithFacebook = async (req, res, next) => {
+  try {
+    const { accessToken } = req.body
+    const data = await authService.loginWithFacebook({ accessToken })
+    return sendSuccess(res, {
+      messageKey: 'auth.loginSuccess',
+      data,
+    }, req)
+  } catch (error) {
+    if (error.message === 'ACCOUNT_BANNED') {
+      return sendError(res, {
+        statusCode: 403,
+        messageKey: 'auth.accountBanned',
+      }, req)
+    }
+    if (error.message === 'SOCIAL_TOKEN_INVALID') {
+      return sendError(res, {
+        statusCode: 401,
+        messageKey: 'auth.invalidCredentials',
+      }, req)
+    }
+    if (error.message === 'EMAIL_REQUIRED') {
+      return sendError(res, {
+        statusCode: 400,
+        messageKey: 'common.validationFailed',
+        errors: [{ field: 'email', message: 'Email là bắt buộc' }],
+      }, req)
+    }
+    next(error)
+  }
+}
+
+/**
  * Refresh access token
  * POST /api/auth/refresh
  */
