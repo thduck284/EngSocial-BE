@@ -8,7 +8,7 @@ import { sendSuccess, sendPaginated } from '../dto/index.js'
  */
 export const getPractices = async (req, res, next) => {
   try {
-    const { skill, level, topic, status = 'published', page = 1, limit = 10 } = req.query
+    const { skill, level, topic, status = 'published', page = 1, limit = 10, title } = req.query
 
     if (!skill || !['reading', 'listening', 'writing'].includes(skill)) {
       return sendPaginated(res, {
@@ -20,6 +20,7 @@ export const getPractices = async (req, res, next) => {
     const filter = { skill, status, category: 'practice' }
     if (level) filter.level = level
     if (topic) filter.topic = new RegExp(topic, 'i')
+    if (title) filter.title = new RegExp(title, 'i')
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1)
     const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 10))

@@ -14,6 +14,8 @@ router.post('/posts', auth, validate(createPostSchema), communityController.crea
 router.patch('/posts/:id', auth, validate(updatePostSchema), communityController.updatePost)
 router.delete('/posts/:id', auth, communityController.deletePost)
 router.get('/posts/:id/reactions', communityController.getPostReactions)
+router.get('/posts/:id/comment-users', communityController.getPostCommentUsers)
+router.get('/posts/:id/share-users', communityController.getPostShareUsers)
 router.post('/posts/:id/like', auth, communityController.toggleLike)
 router.post('/posts/:id/reaction', auth, validate(setReactionSchema), communityController.setReaction)
 

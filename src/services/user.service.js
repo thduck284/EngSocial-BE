@@ -163,8 +163,16 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
 }
 
 export const getMyStats = async (userId) => {
-  const user = await User.findById(userId).select('level xp').lean()
+  const user = await User.findById(userId).select('level xp totalXp')
   if (!user) return null
+
+  // Auto-level up if stalled (compensation logic)
+  const nextLevel = user.level + 1
+  const xpNeededForNext = nextLevel * 50
+  if (user.xp >= xpNeededForNext) {
+    user.awardXp(0)
+    await user.save()
+  }
 
   const skillDocs = await UserSkillStats.find({ userId }).lean()
   const weeklyXp = { reading: 0, listening: 0, writing: 0 }
@@ -193,7 +201,7 @@ export const getMyStats = async (userId) => {
   return {
     level: Number(user.level) || 1,
     currentXp: Number(user.xp) || 0,
-    xpToNextLevel: 500,
+    xpToNextLevel: (Number(user.level) + 1) * 50,
     weeklyXp,
     skillStats,
   }

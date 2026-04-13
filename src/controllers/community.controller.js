@@ -6,9 +6,9 @@ import { sendSuccess, sendError, sendPaginated } from '../dto/index.js'
 
 export const getPosts = async (req, res, next) => {
   try {
-    const { visibility, groupId, authorId, search, page, limit } = req.query
+    const { visibility, groupId, authorId, search, tab, page, limit } = req.query
     const viewerId = req.userId || null
-    const result = await communityService.getPosts({ visibility, groupId, authorId, search, page, limit, viewerId })
+    const result = await communityService.getPosts({ visibility, groupId, authorId, search, tab, page, limit, viewerId })
     return sendPaginated(res, {
       messageKey: 'community.listSuccess',
       data: result.posts,
@@ -69,7 +69,8 @@ export const downloadPostDocument = async (req, res, next) => {
 
 export const createPost = async (req, res, next) => {
   try {
-    const post = await communityService.createPost(req.userId, req.body)
+    const io = req.app.get('io')
+    const post = await communityService.createPost(req.userId, req.body, io)
     return sendSuccess(res, {
       statusCode: 201,
       messageKey: 'community.postCreated',
@@ -82,7 +83,8 @@ export const createPost = async (req, res, next) => {
 
 export const updatePost = async (req, res, next) => {
   try {
-    const post = await communityService.updatePost(req.userId, req.params.id, req.body)
+    const io = req.app.get('io')
+    const post = await communityService.updatePost(req.userId, req.params.id, req.body, io)
     return sendSuccess(res, {
       messageKey: 'community.postUpdated',
       data: { post },
@@ -115,7 +117,8 @@ export const deletePost = async (req, res, next) => {
 
 export const toggleLike = async (req, res, next) => {
   try {
-    const result = await communityService.toggleLike(req.userId, req.params.id)
+    const io = req.app.get('io')
+    const result = await communityService.toggleLike(req.userId, req.params.id, io)
     return sendSuccess(res, {
       messageKey: result.liked ? 'community.liked' : 'community.unliked',
       data: result,
@@ -130,8 +133,9 @@ export const toggleLike = async (req, res, next) => {
 
 export const setReaction = async (req, res, next) => {
   try {
+    const io = req.app.get('io')
     const { reaction } = req.body || {}
-    const result = await communityService.setReaction(req.userId, req.params.id, reaction)
+    const result = await communityService.setReaction(req.userId, req.params.id, reaction, io)
     return sendSuccess(res, {
       messageKey: result.liked ? 'community.liked' : 'community.unliked',
       data: result,
@@ -178,8 +182,9 @@ export const getComments = async (req, res, next) => {
 
 export const setCommentReaction = async (req, res, next) => {
   try {
+    const io = req.app.get('io')
     const { reaction } = req.body || {}
-    const result = await communityService.setCommentReaction(req.userId, req.params.commentId, reaction)
+    const result = await communityService.setCommentReaction(req.userId, req.params.commentId, reaction, io)
     return sendSuccess(res, {
       messageKey: result.liked ? 'community.liked' : 'community.unliked',
       data: result,
@@ -209,7 +214,8 @@ export const getCommentReactions = async (req, res, next) => {
 
 export const createComment = async (req, res, next) => {
   try {
-    const comment = await communityService.createComment(req.userId, req.params.postId, req.body)
+    const io = req.app.get('io')
+    const comment = await communityService.createComment(req.userId, req.params.postId, req.body, io)
     return sendSuccess(res, {
       statusCode: 201,
       messageKey: 'community.commentCreated',
@@ -234,6 +240,30 @@ export const deleteComment = async (req, res, next) => {
     if (error.message === 'FORBIDDEN') {
       return sendError(res, { statusCode: 403, messageKey: 'common.forbidden' }, req)
     }
+    next(error)
+  }
+}
+
+export const getPostCommentUsers = async (req, res, next) => {
+  try {
+    const users = await communityService.getPostCommentUsers(req.params.id)
+    return sendSuccess(res, {
+      messageKey: 'community.listSuccess',
+      data: { users },
+    }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const getPostShareUsers = async (req, res, next) => {
+  try {
+    const users = await communityService.getPostShareUsers(req.params.id)
+    return sendSuccess(res, {
+      messageKey: 'community.listSuccess',
+      data: { users },
+    }, req)
+  } catch (error) {
     next(error)
   }
 }

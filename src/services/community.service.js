@@ -1,7 +1,9 @@
 import mongoose from 'mongoose'
-import { Post, Reaction, Comment, User } from '../models/index.js'
+import { Post, Reaction, Comment, User, Friendship } from '../models/index.js'
 import { PostDTO, PostDetailDTO, CommentDTO, CommentDetailDTO } from '../dto/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
+import * as notificationService from './notification.service.js'
+import { emitToUser } from '../config/socket.js'
 
 /** Extract unique hashtag strings from content (without #) */
 function extractHashtags(content) {
@@ -38,6 +40,125 @@ async function normalizeMentionIds(mentionIds) {
   return { ids: validIds, snapshots }
 }
 
+/** Notify users who are mentioned in a post */
+async function notifyPostMentions(io, post, author) {
+  if (!io || !Array.isArray(post.mentions) || post.mentions.length === 0) return
+  const authorName = author?.name || 'Ai đó'
+  const postId = post._id?.toString() || post.id
+  for (const mId of post.mentions) {
+    const mentionUserId = mId?.userId || mId
+    if (String(mentionUserId) === String(author._id)) continue
+    const notification = await notificationService.createNotification({
+      userId: mentionUserId,
+      type: 'post_mention',
+      title: 'Nhắc đến bạn',
+      message: `${authorName} đã nhắc đến bạn trong một bài viết`,
+      fromUserId: author._id,
+      relatedId: postId,
+      relatedType: 'post',
+      data: { postId, userName: authorName },
+    })
+    emitToUser(io, mentionUserId, 'notification', notification)
+  }
+}
+
+/** Notify original author that their post was shared */
+async function notifyPostShared(io, sharedPostId, sharer) {
+  if (!io || !sharedPostId) return
+  const sharedPost = await Post.findById(sharedPostId).select('authorId').lean()
+  if (!sharedPost || String(sharedPost.authorId) === String(sharer._id)) return
+  const sharerName = sharer?.name || 'Ai đó'
+  const postAuthorId = sharedPost.authorId
+  const notification = await notificationService.createNotification({
+    userId: postAuthorId,
+    type: 'post_shared',
+    title: 'Bài viết của bạn đã được chia sẻ',
+    message: `${sharerName} đã chia sẻ bài viết của bạn`,
+    fromUserId: sharer._id,
+    relatedId: sharedPostId,
+    relatedType: 'post',
+    data: { postId: sharedPostId, userName: sharerName },
+  })
+  emitToUser(io, postAuthorId, 'notification', notification)
+}
+
+/** Notify post author that someone commented */
+async function notifyPostComment(io, post, comment, author) {
+  if (!io || !post || !comment || !author) return
+  if (String(post.authorId) === String(author._id)) return
+  const authorName = author?.name || 'Ai đó'
+  const postId = post._id?.toString() || post.id
+  const notification = await notificationService.createNotification({
+    userId: post.authorId,
+    type: 'comment',
+    title: 'Bình luận mới',
+    message: `${authorName} đã bình luận vào bài viết của bạn`,
+    fromUserId: author._id,
+    relatedId: postId,
+    relatedType: 'post',
+    data: { postId, userName: authorName },
+  })
+  emitToUser(io, post.authorId, 'notification', notification)
+}
+
+/** Notify parent comment author that someone replied */
+async function notifyCommentReply(io, parentId, comment, author) {
+  if (!io || !parentId || !comment || !author) return
+  const parent = await Comment.findById(parentId).select('authorId').lean()
+  if (!parent || String(parent.authorId) === String(author._id)) return
+  const authorName = author?.name || 'Ai đó'
+  const postId = comment.postId?.toString()
+  const notification = await notificationService.createNotification({
+    userId: parent.authorId,
+    type: 'comment',
+    title: 'Phản hồi mới',
+    message: `${authorName} đã phản hồi bình luận của bạn`,
+    fromUserId: author._id,
+    relatedId: postId,
+    relatedType: 'post',
+    data: { postId, userName: authorName },
+  })
+  emitToUser(io, parent.authorId, 'notification', notification)
+}
+
+/** Notify post author that someone reacted */
+async function notifyPostReaction(io, post, reactor, reaction) {
+  if (!io || !post || !reactor || !reaction) return
+  if (String(post.authorId) === String(reactor._id)) return
+  const reactorName = reactor?.name || 'Ai đó'
+  const postId = post._id?.toString() || post.id
+  const notification = await notificationService.createNotification({
+    userId: post.authorId,
+    type: 'like',
+    title: 'Tương tác mới',
+    message: `${reactorName} đã bày tỏ cảm xúc với bài viết của bạn`,
+    fromUserId: reactor._id,
+    relatedId: postId,
+    relatedType: 'post',
+    data: { postId, userName: reactorName, reaction },
+  })
+  emitToUser(io, post.authorId, 'notification', notification)
+}
+
+/** Notify comment author that someone reacted */
+async function notifyCommentReaction(io, comment, reactor, reaction) {
+  if (!io || !comment || !reactor || !reaction) return
+  if (String(comment.authorId) === String(reactor._id)) return
+  const reactorName = reactor?.name || 'Ai đó'
+  const postId = comment.postId?.toString()
+  const notification = await notificationService.createNotification({
+    userId: comment.authorId,
+    type: 'comment_like',
+    title: 'Tương tác bình luận',
+    message: `${reactorName} đã thích bình luận của bạn`,
+    fromUserId: reactor._id,
+    relatedId: postId,
+    relatedType: 'post',
+    data: { postId, userName: reactorName, reaction },
+  })
+  emitToUser(io, comment.authorId, 'notification', notification)
+}
+
 /** Normalize documents to [{ url, name }] for storage (accepts string or object) */
 function normalizeDocuments(docs) {
   if (!Array.isArray(docs) || docs.length === 0) return []
@@ -52,31 +173,137 @@ function normalizeDocuments(docs) {
  * Get posts feed. Only filter by visibility when viewing someone else's posts (authorId present and authorId !== viewerId).
  * Own feed or own profile: show all active. Other user's profile: only their public posts.
  */
-export const getPosts = async ({ visibility, groupId, authorId, search, page = 1, limit = 10, viewerId }) => {
-  const filter = { status: 'active' }
+export const getPosts = async ({ visibility, groupId, authorId, search, page = 1, limit = 10, viewerId, tab }) => {
+  const queryFilter = { status: 'active' }
   const isViewingOthers = authorId && viewerId && String(authorId) !== String(viewerId)
+  const currentYearStart = new Date(new Date().getFullYear(), 0, 1)
+
+  // 1. Base Visibility Filtering
   if (isViewingOthers) {
-    filter.visibility = 'public'
-  } else if (visibility != null && visibility !== '') {
-    filter.visibility = visibility
+    queryFilter.visibility = 'public'
+    queryFilter.authorId = authorId
+  } else if (authorId) {
+    queryFilter.authorId = authorId
+    if (visibility != null && visibility !== '') {
+      queryFilter.visibility = visibility
+    }
+  } else if (groupId) {
+    queryFilter.groupId = groupId
+    if (visibility != null && visibility !== '') {
+      queryFilter.visibility = visibility
+    }
+  } else {
+    if (viewerId) {
+      queryFilter.$or = [
+        { visibility: 'public' },
+        { authorId: viewerId }
+      ]
+    } else {
+      queryFilter.visibility = 'public'
+    }
   }
-  if (groupId) filter.groupId = groupId
-  if (authorId) filter.authorId = authorId
-  if (search) filter.$text = { $search: search }
 
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
-  const total = await Post.countDocuments(filter)
-  const posts = await Post.find(filter)
-    .populate('authorId', 'name avatar level totalXp')
-    .populate('groupId', 'name icon type')
-    .populate('mentions', 'name avatar')
-    .populate({
-      path: 'sharedPostId',
-      populate: { path: 'authorId', select: 'name avatar level totalXp' },
-    })
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(perPage)
+
+  // 2. Following Tab logic
+  if (tab === 'following' && viewerId) {
+    const list = await Friendship.find({
+      $or: [
+        { userId: viewerId, status: { $in: ['pending', 'accepted'] } },
+        { friendId: viewerId, status: 'accepted' }
+      ]
+    }).lean()
+
+    const followingIds = list.map(f => String(f.userId) === String(viewerId) ? f.friendId : f.userId)
+    const acceptedFriendIds = list.filter(f => f.status === 'accepted').map(f => String(f.userId) === String(viewerId) ? f.friendId : f.userId)
+
+    if (followingIds.length === 0) {
+      queryFilter.authorId = new mongoose.Types.ObjectId()
+    } else {
+      // We want posts ONLY from people we follow
+      queryFilter.authorId = { $in: followingIds }
+      // AND we show: public posts (from anyone we follow) 
+      // OR friends-only posts (ONLY from accepted friends)
+      queryFilter.$or = [
+        { visibility: 'public' },
+        { visibility: 'friends', authorId: { $in: acceptedFriendIds } }
+      ]
+    }
+  }
+
+  if (search) queryFilter.$text = { $search: search }
+
+  const total = await Post.countDocuments(queryFilter)
+
+  let posts = []
+  const isShuffleTab = tab === 'all' || tab === 'following' || tab === 'popular'
+
+  if (isShuffleTab && total > 0) {
+    const pipeline = [{ $match: queryFilter }]
+
+    if (tab === 'popular') {
+      // For popular: Filter by this year and sort by interactions before sampling
+      // We also consider interaction from any post but preferentially newer ones.
+      // But the user asked for "in this year".
+      pipeline[0].$match.createdAt = { $gte: currentYearStart }
+      
+      // Calculate interaction sum for ranking
+      pipeline.push({
+        $addFields: {
+          interactionScore: { $add: ['$likeCount', '$commentCount'] }
+        }
+      })
+      // Sort by score to get the most interactive ones
+      pipeline.push({ $sort: { interactionScore: -1 } })
+      // Take top 500 to shuffle from
+      pipeline.push({ $limit: 500 })
+    }
+
+    // Shuffling
+    pipeline.push({ $sample: { size: perPage } })
+
+    // Populates using $lookup (simplified, we use Post.populate after)
+    // Actually, I'll just use aggregate to find the IDs then find them properly
+    // This is more efficient for populating correctly.
+    const ids = await Post.aggregate([...pipeline, { $project: { _id: 1 } }])
+    const postIds = ids.map(i => i._id)
+    
+    posts = await Post.find({ _id: { $in: postIds } })
+      .populate('authorId', 'name avatar level totalXp')
+      .populate('groupId', 'name icon type')
+      .populate('mentions', 'name avatar')
+      .populate({
+        path: 'sharedPostId',
+        populate: { path: 'authorId', select: 'name avatar level totalXp' },
+      })
+  } else {
+    // Default (latest first) or Following (fallback)
+    posts = await Post.find(queryFilter)
+      .populate('authorId', 'name avatar level totalXp')
+      .populate('groupId', 'name icon type')
+      .populate('mentions', 'name avatar')
+      .populate({
+        path: 'sharedPostId',
+        populate: { path: 'authorId', select: 'name avatar level totalXp' },
+      })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(perPage)
+  }
+
+  if (tab === 'all') {
+    // Deep populate for aggregation fallback (mentions and sharedPostId)
+    // Actually, I'll just use Post.populate on the results.
+    await Post.populate(posts, [
+      { path: 'authorId', select: 'name avatar level totalXp' },
+      { path: 'groupId', select: 'name icon type' },
+      { path: 'mentions', select: 'name avatar' },
+      {
+        path: 'sharedPostId',
+        populate: { path: 'authorId', select: 'name avatar level totalXp' },
+      }
+    ])
+  }
 
   // If viewer is logged in, attach liked + userReaction per post from Reaction
   let reactionMap = new Map()
@@ -159,7 +386,7 @@ export const getPostDocument = async (postId, index) => {
  * Create a post (parses hashtags from content if tags not provided; normalizes mentions to valid user IDs).
  * content is stored as-is including @mention text (e.g. "Hello @John Doe"); mentions array holds user IDs for refs.
  */
-export const createPost = async (userId, data) => {
+export const createPost = async (userId, data, io = null) => {
   const tags = Array.isArray(data.tags) && data.tags.length > 0
     ? data.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean)
     : extractHashtags(data.content)
@@ -198,13 +425,20 @@ export const createPost = async (userId, data) => {
     .populate('mentions', 'name avatar')
     .populate('groupId', 'name icon type')
     .lean()
+  
+  // Async notifications
+  notifyPostMentions(io, post, author).catch(err => console.error('Notify mentions err:', err))
+  if (data.sharedPostId) {
+    notifyPostShared(io, data.sharedPostId, author).catch(err => console.error('Notify share err:', err))
+  }
+
   return new PostDetailDTO({ ...post.toObject(), mentions: populated?.mentions ?? post.mentions }, author)
 }
 
 /**
  * Update a post
  */
-export const updatePost = async (userId, postId, data) => {
+export const updatePost = async (userId, postId, data, io = null) => {
   const post = await Post.findById(postId)
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
   if (post.authorId.toString() !== userId) throw new Error('FORBIDDEN')
@@ -237,6 +471,11 @@ export const updatePost = async (userId, postId, data) => {
     .populate('mentions', 'name avatar')
     .populate('groupId', 'name icon type')
     .lean()
+
+  if (data.mentions !== undefined) {
+    notifyPostMentions(io, post, author).catch(err => console.error('Notify mentions update err:', err))
+  }
+
   return new PostDetailDTO({ ...post.toObject(), mentions: populated?.mentions ?? post.mentions }, author)
 }
 
@@ -269,7 +508,7 @@ async function getReactionCountsForPost(postId) {
   }, {})
 }
 
-export const setReaction = async (userId, postId, reaction) => {
+export const setReaction = async (userId, postId, reaction, io = null) => {
   const post = await Post.findById(postId)
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
 
@@ -286,19 +525,29 @@ export const setReaction = async (userId, postId, reaction) => {
     await existing.save()
     const updated = await Post.findById(postId).select('likeCount').lean()
     const reactionCounts = await getReactionCountsForPost(postId)
+
+    // Notify post author of the updated reaction
+    const reactor = await User.findById(userId).select('name').lean()
+    notifyPostReaction(io, post, reactor, reaction).catch(err => console.error('Notify post reaction (update) err:', err))
+
     return { liked: true, userReaction: reaction, likeCount: updated?.likeCount ?? 0, reactionCounts }
   }
   await Reaction.create({ targetType: 'post', targetId: postId, userId, reaction })
   await Post.findByIdAndUpdate(postId, { $inc: { likeCount: 1 } })
   const updated = await Post.findById(postId).select('likeCount').lean()
   const reactionCounts = await getReactionCountsForPost(postId)
+
+  // Notify post author
+  const reactor = await User.findById(userId).select('name').lean()
+  notifyPostReaction(io, post, reactor, reaction).catch(err => console.error('Notify post reaction err:', err))
+
   return { liked: true, userReaction: reaction, likeCount: updated?.likeCount ?? 0, reactionCounts }
 }
 
 /**
  * Like/Unlike a post (legacy endpoint: toggles "like"). Prefer setReaction for 6 reaction types.
  */
-export const toggleLike = async (userId, postId) => {
+export const toggleLike = async (userId, postId, io = null) => {
   const existing = await Reaction.findOne({ targetType: 'post', targetId: postId, userId })
   if (existing) {
     if (existing.reaction === 'like') {
@@ -312,6 +561,11 @@ export const toggleLike = async (userId, postId) => {
   }
   await Reaction.create({ targetType: 'post', targetId: postId, userId, reaction: 'like' })
   await Post.findByIdAndUpdate(postId, { $inc: { likeCount: 1 } })
+  
+  const post = await Post.findById(postId).select('authorId').lean()
+  const reactor = await User.findById(userId).select('name').lean()
+  notifyPostReaction(io, post, reactor, 'like').catch(err => console.error('Notify post toggleLike err:', err))
+
   return { liked: true, userReaction: 'like' }
 }
 
@@ -436,7 +690,7 @@ async function getReactionCountsForComment(commentId) {
   }, {})
 }
 
-export const setCommentReaction = async (userId, commentId, reaction) => {
+export const setCommentReaction = async (userId, commentId, reaction, io = null) => {
   const comment = await Comment.findById(commentId)
   if (!comment || comment.status !== 'active') throw new Error('COMMENT_NOT_FOUND')
 
@@ -453,19 +707,29 @@ export const setCommentReaction = async (userId, commentId, reaction) => {
     await existing.save()
     const updated = await Comment.findById(commentId).select('likeCount').lean()
     const reactionCounts = await getReactionCountsForComment(commentId)
+    
+    // Notify comment author of the updated reaction
+    const reactor = await User.findById(userId).select('name').lean()
+    notifyCommentReaction(io, comment, reactor, reaction).catch(err => console.error('Notify comment reaction (update) err:', err))
+
     return { liked: true, userReaction: reaction, likeCount: updated?.likeCount ?? 0, reactionCounts }
   }
   await Reaction.create({ targetType: 'comment', targetId: commentId, userId, reaction })
   await Comment.findByIdAndUpdate(commentId, { $inc: { likeCount: 1 } })
   const updated = await Comment.findById(commentId).select('likeCount').lean()
   const reactionCounts = await getReactionCountsForComment(commentId)
+
+  // Notify comment author
+  const reactor = await User.findById(userId).select('name').lean()
+  notifyCommentReaction(io, comment, reactor, reaction).catch(err => console.error('Notify comment reaction err:', err))
+
   return { liked: true, userReaction: reaction, likeCount: updated?.likeCount ?? 0, reactionCounts }
 }
 
 /**
  * Create a comment
  */
-export const createComment = async (userId, postId, { content, parentId, images, video, audio, documents } = {}) => {
+export const createComment = async (userId, postId, { content, parentId, images, video, audio, documents } = {}, io = null) => {
   const post = await Post.findById(postId)
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
 
@@ -492,6 +756,36 @@ export const createComment = async (userId, postId, { content, parentId, images,
   }
 
   const author = await User.findById(userId).select('name avatar level totalXp')
+  
+  // 1. Notify Parent Comment Author (if reply)
+  if (parentId) {
+    notifyCommentReply(io, parentId, comment, author).catch(err => console.error('Notify comment reply err:', err))
+  }
+
+  // 2. Notify Post Author (always, unless they were already notified as parent author or they are the sender)
+  const isPostAuthorDifferentFromParent = !parentId || (String(post.authorId) !== String(comment.authorId)) // wait, comment.authorId is userId
+  // Actually, I should check against the parent's authorId
+  // Let's do it cleaner.
+  
+  const postAuthorId = String(post.authorId)
+  const senderId = String(userId)
+  
+  // If I am NOT the post author, notify them
+  if (postAuthorId !== senderId) {
+    // If it's a reply, only notify post author if they aren't the one being replied to (who already got notified)
+    let shouldNotifyPostAuthor = true
+    if (parentId) {
+      const parent = await Comment.findById(parentId).select('authorId').lean()
+      if (parent && String(parent.authorId) === postAuthorId) {
+        shouldNotifyPostAuthor = false // Already notified via notifyCommentReply
+      }
+    }
+    
+    if (shouldNotifyPostAuthor) {
+      notifyPostComment(io, post, comment, author).catch(err => console.error('Notify post comment err:', err))
+    }
+  }
+
   return new CommentDetailDTO(comment, author)
 }
 
@@ -507,4 +801,56 @@ export const deleteComment = async (userId, commentId) => {
   await comment.save()
   await Post.findByIdAndUpdate(comment.postId, { $inc: { commentCount: -1 } })
   return true
+}
+
+/**
+ * Get list of unique users who commented on a post
+ */
+export const getPostCommentUsers = async (postId) => {
+  const comments = await Comment.find({ postId, status: 'active' })
+    .select('authorId')
+    .populate('authorId', 'name avatar')
+    .lean()
+  
+  const users = []
+  const seen = new Set()
+  comments.forEach(c => {
+    if (!c.authorId) return
+    const id = (c.authorId._id || c.authorId).toString()
+    if (!seen.has(id)) {
+      seen.add(id)
+      users.push({
+        userId: id,
+        name: c.authorId.name,
+        avatar: c.authorId.avatar
+      })
+    }
+  })
+  return users
+}
+
+/**
+ * Get list of unique users who shared a post
+ */
+export const getPostShareUsers = async (postId) => {
+  const posts = await Post.find({ sharedPostId: postId, status: 'active' })
+    .select('authorId')
+    .populate('authorId', 'name avatar')
+    .lean()
+    
+  const users = []
+  const seen = new Set()
+  posts.forEach(p => {
+    if (!p.authorId) return
+    const id = (p.authorId._id || p.authorId).toString()
+    if (!seen.has(id)) {
+      seen.add(id)
+      users.push({
+        userId: id,
+        name: p.authorId.name,
+        avatar: p.authorId.avatar
+      })
+    }
+  })
+  return users
 }

@@ -28,6 +28,8 @@
   "license": "MIT",
   "dependencies": {
     "@elastic/elasticsearch": "^8.15.0",
+    "@google/genai": "^1.49.0",
+    "@google/generative-ai": "^0.24.1",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.9.0",
     "cors": "^2.8.5",
@@ -39,7 +41,9 @@
     "mongoose": "^8.0.3",
     "multer": "^2.0.2",
     "nodemailer": "^7.0.13",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

@@ -141,4 +141,23 @@ userSchema.index({ totalXp: -1 })
 userSchema.index({ level: -1, xp: -1 })
 userSchema.index({ status: 1 })
 
+// Check and update level based on XP
+userSchema.methods.awardXp = function(amount = 0) {
+  if (amount > 0) {
+    this.totalXp += amount
+    this.xp += amount
+  }
+  
+  while (this.level < 100) {
+    const nextLevel = this.level + 1
+    const xpNeededForNext = nextLevel * 50
+    if (this.xp >= xpNeededForNext) {
+      this.xp -= xpNeededForNext
+      this.level = nextLevel
+    } else {
+      break
+    }
+  }
+}
+
 export default mongoose.model('User', userSchema)

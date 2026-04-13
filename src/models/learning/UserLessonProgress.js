@@ -28,6 +28,17 @@ const attemptHistorySchema = new mongoose.Schema({
   submission: {
     content: String,
     wordCount: Number,
+    feedback: String,
+    score: Number,
+    aiFeedback: String,
+    aiScore: Number,
+    aiStrengths: [String],
+    aiImprovements: [String],
+    aiGrammarErrors: [{
+      original: String,
+      correction: String,
+      explanation: String
+    }],
   },
 }, { _id: false })
 
@@ -44,7 +55,7 @@ const userLessonProgressSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['not_started', 'in_progress', 'completed'],
+    enum: ['not_started', 'in_progress', 'under_review', 'completed'],
     default: 'not_started',
   },
   progress: { type: Number, default: 0, min: 0, max: 100 },
@@ -56,6 +67,15 @@ const userLessonProgressSchema = new mongoose.Schema({
     submittedAt: Date,
     feedback: String,
     score: Number,
+    aiFeedback: String,
+    aiScore: Number,
+    aiStrengths: [String],
+    aiImprovements: [String],
+    aiGrammarErrors: [{
+      original: String,
+      correction: String,
+      explanation: String
+    }],
   },
   score: { type: Number, default: 0 },
   maxScore: Number,

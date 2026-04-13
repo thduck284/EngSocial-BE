@@ -56,6 +56,7 @@ async function start() {
   server = http.createServer(app)
   const io = new SocketIOServer(server, socketOptions)
   app.set('io', io)
+  global.ioInstance = io
   setupSocket(io)
 
   server.listen(PORT, () => {

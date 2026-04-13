@@ -1,5 +1,9 @@
 import { ChatbotConversation, ChatbotMessage } from '../models/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
+import { GoogleGenAI } from '@google/genai'
+import dotenv from 'dotenv'
+
+dotenv.config()
 
 /**
  * Get user's chatbot conversations
@@ -88,8 +92,8 @@ export const sendMessage = async (userId, { conversationId, message, skill, less
     content: message,
   })
 
-  // Generate AI response (placeholder - integrate with actual AI service)
-  const aiResponse = generateAIResponse(message, skill || conversation.skill)
+  // Generate AI response
+  const aiResponse = await generateAIResponse(message, skill || conversation.skill, conversationId)
 
   // Save AI response
   const assistantMessage = await ChatbotMessage.create({
@@ -137,60 +141,67 @@ export const deleteConversation = async (userId, conversationId) => {
 }
 
 /**
- * Placeholder AI response generator
- * TODO: Replace with actual AI API integration (OpenAI, Gemini, etc.)
+ * AI response generator using Gemini
  */
-function generateAIResponse(message, skill) {
-  const lowerMsg = message.toLowerCase()
-
-  // Learning path suggestions
-  if (lowerMsg.includes('lộ trình') || lowerMsg.includes('learning path') || lowerMsg.includes('bắt đầu')) {
+async function generateAIResponse(message, skill, conversationId) {
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) {
     return {
-      content: 'Đây là lộ trình học tiếng Anh gợi ý cho bạn:\n\n1. **Cơ bản (A1-A2):** Học từ vựng cơ bản, ngữ pháp đơn giản\n2. **Trung cấp (B1-B2):** Luyện đọc hiểu, nghe hiểu, viết đoạn văn\n3. **Nâng cao (C1-C2):** Kỹ năng giao tiếp, viết luận, đọc báo\n\nBạn muốn bắt đầu từ level nào?',
-      actions: [
-        { label: 'Bắt đầu A1', icon: '🌱', action: 'start_level_a1' },
-        { label: 'Kiểm tra trình độ', icon: '📋', action: 'placement_test' },
-        { label: 'Xem kỹ năng', icon: '📚', action: 'view_skills' },
-      ],
+      content: 'AI Service currently unavailable (Missing API Key). How can I help you today?',
     }
   }
 
-  // Vocabulary help
-  if (lowerMsg.includes('từ vựng') || lowerMsg.includes('vocabulary') || lowerMsg.includes('word')) {
-    return {
-      content: 'Tôi có thể giúp bạn học từ vựng! Hãy cho tôi biết chủ đề bạn muốn học.',
-      data: {
-        suggestions: ['Travel', 'Business', 'Daily Life', 'Technology', 'Food'],
-      },
-      actions: [
-        { label: 'Flashcard', icon: '🃏', action: 'flashcard_mode' },
-        { label: 'Trắc nghiệm', icon: '✅', action: 'quiz_mode' },
-        { label: 'Game từ vựng', icon: '🎮', action: 'vocab_game' },
-      ],
-    }
-  }
+  try {
+    const client = new GoogleGenAI({ apiKey })
 
-  // Grammar help
-  if (lowerMsg.includes('ngữ pháp') || lowerMsg.includes('grammar') || lowerMsg.includes('tense')) {
-    return {
-      content: 'Ngữ pháp tiếng Anh có nhiều chủ đề. Bạn muốn ôn tập về gì?\n\n- **Thì (Tenses):** Present, Past, Future\n- **Câu điều kiện (Conditionals)**\n- **Câu bị động (Passive Voice)**\n- **Mệnh đề quan hệ (Relative Clauses)**',
-      data: {
-        grammar: { topics: ['tenses', 'conditionals', 'passive', 'relative_clauses'] },
-      },
-      actions: [
-        { label: 'Ôn thì', icon: '⏰', action: 'review_tenses' },
-        { label: 'Bài tập', icon: '📝', action: 'grammar_exercises' },
-      ],
-    }
-  }
+    // Get chat history for context
+    const history = await ChatbotMessage.find({ conversationId })
+      .sort({ createdAt: 1 })
+      .limit(10)
+      .lean()
 
-  // Default response
-  return {
-    content: `Tôi là trợ lý học tiếng Anh của EngSocial! Tôi có thể giúp bạn:\n\n- 📚 Gợi ý lộ trình học\n- 📖 Học từ vựng theo chủ đề\n- ✍️ Ôn tập ngữ pháp\n- 🎯 Luyện kỹ năng đọc, nghe, viết\n\nHãy hỏi tôi bất cứ điều gì liên quan đến tiếng Anh!`,
-    actions: [
-      { label: 'Lộ trình học', icon: '🗺️', action: 'learning_path' },
-      { label: 'Học từ vựng', icon: '📖', action: 'vocabulary' },
-      { label: 'Ngữ pháp', icon: '✍️', action: 'grammar' },
-    ],
+    const systemPrompt = `You are a helpful English learning assistant on EngSocial. 
+    Users talk to you to improve their English skills (specifically: ${skill}). 
+    Keep responses friendly, educational, and encouraging. 
+    If appropriate, provide vocabulary tips or correct the user's grammar in a helpful way.`
+
+    const contents = history.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    }))
+    contents.push({ role: 'user', parts: [{ text: message }] })
+
+    const modelsToTry = [
+      'gemini-3-flash-preview',
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash'
+    ]
+
+    let lastError = null
+    for (const modelName of modelsToTry) {
+      try {
+        const response = await client.models.generateContent({
+          model: modelName,
+          contents: contents,
+          config: {
+            systemInstruction: systemPrompt,
+          }
+        })
+
+        const content = response.text
+        return { content }
+      } catch (error) {
+        console.warn(`Chat model ${modelName} failed, trying next...`, error.message)
+        lastError = error
+      }
+    }
+
+    throw lastError
+  } catch (error) {
+    console.error('Gemini Chat Error:', error)
+    return {
+      content: 'I am having some trouble connecting to my brain! All models are currently busy. Please try again in a moment.',
+    }
   }
 }

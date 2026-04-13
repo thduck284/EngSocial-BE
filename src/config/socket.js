@@ -1,7 +1,8 @@
 import mongoose from 'mongoose'
 import { verifyToken } from '../utils/jwt.js'
 import { Conversation } from '../models/index.js'
-import { registerWordScrambleLobbyHandlers } from '../sockets/wordScrambleLobby.js'
+import { registerWordScrambleLobbyHandlers, rooms } from '../sockets/wordScrambleLobby.js'
+import { registerWordScrambleGameHandlers } from '../sockets/wordScrambleGame.js'
 
 const corsOrigin = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
@@ -82,6 +83,7 @@ export function setupSocket(io) {
 
   io.on('connection', (socket) => {
     registerWordScrambleLobbyHandlers(io, socket)
+    registerWordScrambleGameHandlers(io, socket, rooms)
     if (socket.userId) {
       registerUserSocket(socket.userId, socket.id)
       getConversationPartnerIds(socket.userId).then((partnerIds) => {

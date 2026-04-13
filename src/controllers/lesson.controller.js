@@ -12,13 +12,14 @@ import { generateUniqueSlug } from '../utils/slug.js'
  */
 export const getLessons = async (req, res, next) => {
   try {
-    const { skill, level, topic, status = 'published', featured, category, page = 1, limit = 10 } = req.query
+    const { skill, level, topic, status = 'published', featured, category, page = 1, limit = 10, title } = req.query
 
     const filter = {}
     if (status && status !== 'all') filter.status = status
     if (skill) filter.skill = skill
     if (level) filter.level = level
     if (topic) filter.topic = new RegExp(topic, 'i')
+    if (title) filter.title = new RegExp(title, 'i')
     if (featured !== undefined) filter.featured = featured === 'true'
     if (category && category !== 'all') filter.category = category
 
@@ -462,6 +463,9 @@ export const getLessonProgress = async (req, res, next) => {
       answers: progress?.attemptHistory?.[(progress?.attemptHistory?.length || 1) - 1]?.answers || [],
       xpEarned: progress?.xpEarned,
       attempts: progress?.attempts || 0,
+      submission: progress?.submission,
+      aiScore: progress?.aiScore,
+      aiFeedback: progress?.aiFeedback,
       attemptHistory: progress?.attemptHistory || [],
     }
     return sendSuccess(res, { data }, req)
@@ -618,6 +622,118 @@ export const submitWritingLesson = async (req, res, next) => {
       timeSpent,
     })
     return sendSuccess(res, { data: progress }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * Get reviews for a lesson
+ * GET /api/lessons/:id/reviews
+ */
+export const getLessonReviews = async (req, res, next) => {
+  try {
+    const { page, limit } = req.query
+    const result = await lessonService.getLessonReviews(req.params.id, {
+      page: parseInt(page, 10) || 1,
+      limit: parseInt(limit, 10) || 10,
+    })
+    return sendPaginated(res, {
+      data: result.reviews,
+      pagination: result.pagination,
+    }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * Add or update review for a lesson
+ * POST /api/lessons/:id/reviews
+ */
+export const addLessonReview = async (req, res, next) => {
+  try {
+    const { rating, comment } = req.body
+    if (!rating || rating < 1 || rating > 10) {
+      return sendError(res, {
+        statusCode: 400,
+        message: 'Rating must be between 1 and 10',
+      }, req)
+    }
+    const review = await lessonService.addLessonReview(req.userId, req.params.id, { rating, comment })
+    return sendSuccess(res, {
+      message: 'Review submitted successfully',
+      data: review,
+    }, req)
+  } catch (error) {
+    if (error.message === 'LESSON_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Get all user results for a lesson (Admin/Mod)
+ * GET /api/lessons/:id/all-results
+ */
+export const getAllLessonResults = async (req, res, next) => {
+  try {
+    const { page, limit } = req.query
+    const { id } = req.params
+    const result = await lessonService.getAllLessonResults(id, {
+      page: parseInt(page, 10) || 1,
+      limit: parseInt(limit, 10) || 20,
+    })
+    return sendPaginated(res, {
+      data: result.results,
+      pagination: result.pagination,
+    }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * Grade user writing submission (Admin/Mod)
+ * POST /api/lessons/:id/grade/:userId
+ */
+export const gradeUserWriting = async (req, res, next) => {
+  try {
+    const { id, userId } = req.params
+    const { score, feedback } = req.body
+    
+    if (score === undefined || score === null) {
+      return sendError(res, { statusCode: 400, message: 'Score is required' }, req)
+    }
+
+    const result = await lessonService.gradeUserWriting(id, userId, { score, feedback })
+    return sendSuccess(res, {
+      message: 'Graded successfully',
+      data: result,
+    }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+/**
+ * Get AI suggestion for writing submission (Admin/Mod)
+ * POST /api/lessons/:id/ai-grade/:userId
+ */
+export const aiGradeWriting = async (req, res, next) => {
+  try {
+    const { id, userId } = req.params
+    
+    // Check permission: owner or mod/admin
+    if (req.userId !== userId && !req.isModerator && !req.isAdmin) {
+      return sendError(res, { statusCode: 403, message: 'Forbidden' }, req)
+    }
+
+    const result = await lessonService.aiGradeWriting(id, userId)
+    return sendSuccess(res, {
+      message: 'AI grading completed',
+      data: result,
+    }, req)
   } catch (error) {
     next(error)
   }
