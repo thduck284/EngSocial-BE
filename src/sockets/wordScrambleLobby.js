@@ -1,5 +1,7 @@
 import { User } from '../models/index.js'
 import * as matchmakingService from '../services/matchmaking.service.js'
+import { emitToUser } from '../config/socket.js'
+import fs from 'fs'
 
 // Hàng chờ theo capacity (2, 4, 6, 8)
 const globalQueues = new Map()
@@ -15,14 +17,27 @@ const roomChannel = (code) => `room:${code}`
 const loadProfile = async (userId) => {
   const user = await User.findById(userId).select('name avatar level').lean()
   return {
-    userId: user._id.toString(),
-    name: user.name || 'Unknown',
-    avatar: user.avatar || '',
-    level: user.level || 1,
+    userId: user?._id?.toString() || userId,
+    name: user?.name || 'Unknown',
+    avatar: user?.avatar || '',
+    level: user?.level || 1,
   }
 }
 
 const newRoomCode = () => Math.random().toString(36).substring(2, 8).toUpperCase()
+
+/**
+ * To prevent 'Maximum call stack size exceeded' if circular references creep in.
+ */
+const sanitizeObject = (obj) => {
+  if (!obj) return obj
+  try {
+    return JSON.parse(JSON.stringify(obj))
+  } catch (err) {
+    console.error('[Lobby] [ERROR] Circular reference or too deep object in emit:', err.message)
+    return { error: 'data_serialization_failed' }
+  }
+}
 
 // Biến để kiểm tra xem interval quét hàng chờ đã được chạy chưa (tránh chạy nhiều lần)
 let intervalStarted = false
@@ -45,10 +60,15 @@ async function processMatchmaking(io, capacity) {
     const hostMember = activeBatch[0]
     const others = activeBatch.slice(1).map(m => String(m.userId))
 
-    // LUÔN GỌI AI ĐỂ THẤY REQUEST (Mỗi lần quét 3s đều gọi sang AI)
+    // Chuẩn bị profiles cho những người trong hàng chờ
+    const queueProfiles = await Promise.all(
+      others.map(uid => matchmakingService.getMatchmakingProfile(uid, capacity))
+    )
+
+    // GỌI AI VỚI PROFILES ĐÃ CHUẨN BỊ
     const aiResult = await matchmakingService.callMatchmakingAI(
       hostMember.userId,
-      others,
+      queueProfiles,
       capacity
     ).catch(() => null)
 
@@ -108,22 +128,22 @@ async function processMatchmaking(io, capacity) {
         io.in(`user:${m.userId}`).socketsJoin(roomChannel(code))
 
         console.log(`[Lobby] Notifying User Room 'user:${m.userId}' (Socket ${m.socketId}) to start Game...`)
-        io.to(`user:${m.userId}`).emit('wordScrambleLobby:started', {
+        io.to(`user:${m.userId}`).emit('wordScrambleLobby:started', sanitizeObject({
           roomCode: code,
           aiResult,
           isAutoMatched: true,
           matchCount: actualCapacity,
           others: otherMembersIds,
           fullRoom: room
-        })
+        }))
       })
 
       // GỬI CHỐT LẦN CUỐI QUA KÊNH TOÀN CỤC PHÒNG TRƯỜNG HỢP CÁ NHÂN THẤT BẠI
-      io.emit('wordScrambleLobby:matchFoundGlobal', {
+      io.emit('wordScrambleLobby:matchFoundGlobal', sanitizeObject({
         roomCode: code,
         userIds: groupIds,
         fullRoom: room
-      })
+      }))
 
       console.log(`✅ Match Success: Room ${code} created for IDs: ${groupIds.join(', ')}`)
     }
@@ -164,7 +184,7 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
         if (room.slots.filter(Boolean).length === 0) {
           rooms.delete(currentRoomCode)
         } else {
-          io.to(roomChannel(currentRoomCode)).emit('wordScrambleLobby:state', room)
+          io.to(roomChannel(currentRoomCode)).emit('wordScrambleLobby:state', sanitizeObject(room))
         }
       }
       socket.leave(roomChannel(currentRoomCode))
@@ -191,8 +211,8 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
       rooms.set(code, room)
       currentRoomCode = code
       socket.join(roomChannel(code))
-      ack?.({ ok: true, roomCode: code })
-      socket.emit('wordScrambleLobby:state', room)
+      ack?.({ ok: true, roomCode: code, state: sanitizeObject(room) })
+      socket.emit('wordScrambleLobby:state', sanitizeObject(room))
     } catch (e) {
       ack?.({ ok: false, error: e?.message || 'create_failed' })
     }
@@ -210,8 +230,8 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
       room.slots[emptySlotIdx] = { ...profile, ready: false, socketId: socket.id, joinedAt: Date.now() }
       currentRoomCode = code
       socket.join(roomChannel(code))
-      ack?.({ ok: true })
-      io.to(roomChannel(code)).emit('wordScrambleLobby:state', room)
+      ack?.({ ok: true, state: sanitizeObject(room) })
+      io.to(roomChannel(code)).emit('wordScrambleLobby:state', sanitizeObject(room))
     } catch (e) {
       ack?.({ ok: false, error: e?.message || 'join_failed' })
     }
@@ -223,7 +243,7 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
     const slot = room?.slots.find((s) => s?.socketId === socket.id)
     if (slot) {
       slot.ready = !!payload?.ready
-      io.to(roomChannel(currentRoomCode)).emit('wordScrambleLobby:state', room)
+      io.to(roomChannel(currentRoomCode)).emit('wordScrambleLobby:state', sanitizeObject(room))
     }
   })
 
@@ -245,33 +265,134 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
     if (!room || String(room.hostId) !== String(socket.userId)) {
       return ack?.({ ok: false, error: 'no_room_or_not_host' })
     }
+
+    // ĐẢM BẢO HOST LUÔN CÓ MẶT TRONG SLOTS (Phòng hờ lỗi mất dấu)
+    let hostIdx = room.slots.findIndex(s => s && String(s.userId) === String(socket.userId))
+    if (hostIdx === -1) {
+      console.log(`[Lobby] [WARN] Host ${socket.userId} missing from slots! Re-inserting into slot 0.`)
+      const profile = await loadProfile(socket.userId)
+      room.slots[0] = { ...profile, ready: true, socketId: socket.id, joinedAt: Date.now() }
+    } else {
+      room.slots[hostIdx].ready = true // Host ấn Start là mặc định Ready
+    }
+
     const occupied = room.slots.filter(Boolean)
-    const hostJoinInfo = occupied.find(s => String(s.userId) === String(room.hostId))
-    const waitTime = hostJoinInfo?.joinedAt ? (Date.now() - hostJoinInfo.joinedAt) : 0
+    console.log(`[Lobby] [Start] Room ${code} has ${occupied.length} people before merge:`, occupied.map(o => o.name))
 
-    // GỌI AI NGAY LẬP TỨC ĐỂ HIỆN REQUEST
+    // KIỂM TRA TẤT CẢ THÀNH VIÊN TRONG PHÒNG ĐÃ READY CHƯA
+    const allReady = occupied.every(s => s.ready)
+    if (!allReady) {
+      return ack?.({ ok: false, error: 'players_not_ready' })
+    }
+
+    // ĐÁNH DẤU PHÒNG ĐANG TRONG TRẠNG THÁI TÌM TRẬN (Bật Radar)
+    room.lastMatchRequest = Date.now()
     console.log(`[Lobby] [Private] AI Polling for ${code}...`)
-    const otherUserIds = occupied.filter(s => String(s.userId) !== String(room.hostId)).map(s => String(s.userId))
-    const aiResult = await matchmakingService.callMatchmakingAI(room.hostId, otherUserIds, room.capacity).catch(() => null)
+    
+    const publicQueue = globalQueues.get(room.capacity) || []
+    
+    // Tìm các phòng Private khác (PHẢI CÓ RADAR ĐANG BẬT VÀ CÒN CHỖ TRỐNG)
+    const otherRooms = Array.from(rooms.values()).filter(r => 
+      r.code !== code && 
+      r.capacity === room.capacity && 
+      r.lastMatchRequest && (Date.now() - r.lastMatchRequest) < 10000 && 
+      r.slots.filter(Boolean).length < r.capacity
+    )
 
-    // Private room must start only when room itself is full.
+    // Chuẩn bị danh sách "Thực thể" (Entities) cho AI
+    // 1. Entities từ sảnh chờ công khai (mỗi người 1 entity)
+    const queueEntities = await Promise.all(publicQueue.map(m => matchmakingService.getMatchmakingProfile(m.userId, room.capacity)))
+    
+    // 2. Entities từ các phòng Private khác (mỗi phòng 1 entity gồm nhiều người)
+    const otherRoomEntities = await Promise.all(otherRooms.map(async (r) => {
+      const members = r.slots.filter(Boolean)
+      const profiles = await Promise.all(members.map(m => matchmakingService.getMatchmakingProfile(m.userId, room.capacity)))
+      return {
+        entityId: `room:${r.code}`, // Đánh dấu đây là thực thể phòng
+        users: profiles.flatMap(p => p.users)
+      }
+    }))
+
+    const existingOtherUserIds = occupied.filter(s => String(s.userId) !== String(room.hostId)).map(s => String(s.userId))
+    
+    // Gọi AI với tất cả ứng viên
+    const aiResult = await matchmakingService.callMatchmakingAI(
+      room.hostId, 
+      [...queueEntities, ...otherRoomEntities], 
+      room.capacity
+    ).catch(() => null)
+
+    const matchEntityIdsFromAI = aiResult?.output?.ketQuaGhepNhom || []
+    
+    if (occupied.length < room.capacity && matchEntityIdsFromAI.length > 0) {
+      for (const eid of matchEntityIdsFromAI) {
+        if (occupied.length >= room.capacity) break
+        
+        if (eid.startsWith('room:')) {
+          // KỊCH BẢN SÁP NHẬP PHÒNG
+          const targetRoomCode = eid.split(':')[1]
+          const targetRoom = rooms.get(targetRoomCode)
+          if (targetRoom) {
+            const incomingMembers = targetRoom.slots.filter(Boolean)
+            if (occupied.length + incomingMembers.length <= room.capacity) {
+              console.log(`[Lobby] [MERGE] Merging room ${targetRoomCode} into ${code}`)
+              
+              for (const member of incomingMembers) {
+                const emptySlotIdx = room.slots.findIndex(s => s === null)
+                if (emptySlotIdx >= 0) {
+                  room.slots[emptySlotIdx] = { 
+                    userId: String(member.userId), 
+                    name: member.name, 
+                    avatar: member.avatar,
+                    socketId: member.socketId,
+                    ready: true,
+                    joinedAt: Date.now()
+                  }
+                  occupied.push(room.slots[emptySlotIdx])
+                  
+                  console.log(`[Lobby] [MERGE] Pulled member ${member.name} (${member.userId}) into room ${code} at slot ${emptySlotIdx}`)
+                  
+                  // Chuyển người chơi sang phòng mới
+                  io.in(`user:${member.userId}`).socketsJoin(roomChannel(code))
+                  // Xóa họ khỏi phòng cũ
+                  const s = io.sockets.sockets.get(member.socketId)
+                  if (s) s.leave(roomChannel(targetRoomCode))
+                }
+              }
+              // Giải tán phòng cũ
+              rooms.delete(targetRoomCode)
+            }
+          }
+        } else {
+          // KỊCH BẢN KÉO TỪ HÀNG CHỜ CÔNG KHAI (Như cũ)
+          const qIdx = publicQueue.findIndex(m => String(m.userId) === eid)
+          if (qIdx >= 0) {
+            const matchedMember = publicQueue.splice(qIdx, 1)[0]
+            const emptySlotIdx = room.slots.findIndex(s => s === null)
+            if (emptySlotIdx >= 0) {
+              room.slots[emptySlotIdx] = { ...matchedMember, ready: true }
+              occupied.push(room.slots[emptySlotIdx])
+              io.in(`user:${matchedMember.userId}`).socketsJoin(roomChannel(code))
+            }
+          }
+        }
+      }
+    }
+
     if (occupied.length < room.capacity) {
-      console.log(`[Lobby] [Private] Waiting for more members (${occupied.length}/${room.capacity}) - Searching for ${Math.round(waitTime / 1000)}s...`)
+      console.log(`[Lobby] [Private] Matching in progress (${occupied.length}/${room.capacity})...`)
       return ack?.({ ok: false, error: 'not_enough_players' })
     }
 
-    console.log(`[Lobby] [Private] Success! Starting match with participants: ${occupied.map(s => String(s.userId)).join(', ')}`)
-
-    // Thông báo cho cả phòng vào game
+    // THÔNG BÁO CHO TẤT CẢ (BAO GỒM CẢ NHỮNG NGƯỜI MỚI ĐƯỢC PULL VÀO)
     const participantsIds = occupied.map(s => String(s.userId))
-
     io.to(roomChannel(code)).emit('wordScrambleLobby:matching', {})
-    io.to(roomChannel(code)).emit('wordScrambleLobby:started', {
+    io.to(roomChannel(code)).emit('wordScrambleLobby:started', sanitizeObject({
       roomCode: code,
       aiResult,
       others: participantsIds,
       fullRoom: room
-    })
+    }))
 
     ack?.({ ok: true })
   })
@@ -293,5 +414,42 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
     } catch (e) {
       ack?.({ ok: false, error: e?.message || 'find_match_failed' })
     }
+  })
+
+  // MỜI BẠN BÈ VÀO PHÒNG
+  socket.on('wordScrambleLobby:invite', async (payload, ack) => {
+    try { fs.appendFileSync('invite_debug.log', `[${new Date().toISOString()}] Received invite: ${JSON.stringify(payload)} from ${socket.userId}\n`) } catch(e){}
+    
+    const { friendId, roomCode, inviteUrl } = payload
+    if (!friendId || !roomCode) {
+        try { fs.appendFileSync('invite_debug.log', 'Missing data\n') } catch(e){}
+        return ack?.({ ok: false, error: 'missing_data' })
+    }
+
+    const room = rooms.get(roomCode)
+    if (!room) {
+        try { fs.appendFileSync('invite_debug.log', 'Room not found\n') } catch(e){}
+        return ack?.({ ok: false, error: 'room_not_found' })
+    }
+    
+    let inviterName = 'Ai đó'
+    try {
+      const profile = await loadProfile(socket.userId)
+      inviterName = profile?.name || 'Ai đó'
+    } catch(err) { }
+
+    try { fs.appendFileSync('invite_debug.log', `Emit to ${friendId}: ${inviterName}\n`) } catch(e){}
+
+    // Gửi thông báo đến phòng cá nhân của người bạn
+    emitToUser(io, friendId, 'wordScrambleLobby:inviteReceived', {
+      inviterName,
+      inviterId: socket.userId,
+      roomCode,
+      inviteUrl
+    })
+
+    console.log(`[Lobby] [Invite] ${inviterName} invited ${friendId} to ${roomCode}`)
+    try { fs.appendFileSync('invite_debug.log', `Success\n`) } catch(e){}
+    ack?.({ ok: true })
   })
 }

@@ -21,40 +21,73 @@ export const gradeWriting = async (prompt, studentSubmission, metadata = {}) => 
   const client = new GoogleGenAI({ apiKey })
 
   const systemInstructions = `
-    Bạn là một chuyên gia khảo thí tiếng Anh (IELTS/Cambridge expert). 
-    Nhiệm vụ của bạn là chấm điểm bài viết tiếng Anh của học viên dựa trên các tiêu chí chuyên nghiệp.
-    Trình độ mục tiêu: ${level}. Giới hạn từ: ${wordLimit.min}-${wordLimit.max} từ.
-    
-    Hướng dẫn chấm điểm:
-    1. Điểm số (score): Trên thang điểm 0-100. Đánh giá dựa trên:
-       - Task Response (Đúng đề tài, đủ ý)
-       - Coherence and Cohesion (Mạch lạc, liên kết)
-       - Lexical Resource (Từ vựng phong phú, chính xác)
-       - Grammatical Range and Accuracy (Ngữ pháp đa dạng, chính xác)
-    2. Phản hồi (feedback): Cung cấp nhận xét chi tiết bằng TIẾNG VIỆT.
-    3. Điểm mạnh (strengths): Liệt kê các điểm tốt của bài viết.
-    4. Cần cải thiện (improvements): Các điểm cần khắc phục.
-    5. Lỗi ngữ pháp & gợi ý (grammarErrors): 
-       - Tìm các lỗi ngữ pháp, dùng từ sai, hoặc các cách diễn đạt chưa tự nhiên.
-       - Cung cấp: văn bản gốc, cách sửa lại đúng/hay hơn, và giải thích ngắn gọn bằng tiếng Việt.
-    
-    Yêu cầu quan trọng:
-    - Phản hồi phải mang tính xây dựng, khích lệ nhưng vẫn trung thực.
-    - Cấu trúc phản hồi PHẢI LUÔN LÀ JSON như sau:
+You are a strict English writing examiner with IELTS/Cambridge expertise.
+Target CEFR level: ${level}. Word limit: ${wordLimit.min}-${wordLimit.max} words.
+
+## SCORING METHOD (mandatory 2-phase process)
+
+### PHASE 1 – Score each criterion independently out of 25 points:
+
+**C1. Task Response (0-25)**
+- 23-25: Fully answers all parts of the prompt with well-developed ideas
+- 18-22: Addresses the prompt adequately, main ideas clear
+- 13-17: Partially addresses prompt, some ideas underdeveloped
+- 8-12: Prompt only partially covered, ideas unclear or off-topic
+- 0-7: Barely addresses prompt or completely off-topic
+
+**C2. Coherence & Cohesion (0-25)**
+- 23-25: Smooth flow, effective linking words, clear paragraph structure (intro/body/conclusion)
+- 18-22: Generally clear but minor linking issues
+- 13-17: Some paragraphing but linking words repetitive or used incorrectly
+- 8-12: Ideas poorly connected, hard to follow
+- 0-7: No logical organisation, very hard to follow
+
+**C3. Lexical Resource (0-25)**
+- 23-25: Varied, precise vocabulary; no word repetition; natural collocations
+- 18-22: Adequate vocabulary but some repetition or imprecision
+- 13-17: Limited range; same words used repeatedly; some errors
+- 8-12: Very limited vocabulary; many errors in word choice
+- 0-7: Extremely basic vocabulary; major word choice errors throughout
+
+**C4. Grammatical Range & Accuracy (0-25)**
+- 23-25: Wide range of structures; virtually error-free
+- 18-22: Mix of simple/complex; few minor errors
+- 13-17: Mostly simple sentences; noticeable errors but meaning clear
+- 8-12: Many grammatical errors; limited structure variety
+- 0-7: Frequent major errors; very limited structures
+
+### PHASE 2 – Final score = C1 + C2 + C3 + C4 (total 0-100)
+
+## MANDATORY DEDUCTION RULES (apply BEFORE finalizing score):
+- Submission uses MOSTLY simple SVO sentences → C4 cannot exceed 15
+- More than 3 clear grammar errors → C4 cannot exceed 17
+- Repetition of the same word or phrase 3+ times → C3 cannot exceed 16
+- Submission is off-topic or missing parts of the prompt → C1 cannot exceed 14
+- No clear intro or conclusion → C2 cannot exceed 17
+- Submission is under the minimum word count → apply a -10 penalty to total
+
+## CRITICAL CALIBRATION (the AI MUST follow this):
+- A TYPICAL ${level} student submission should score between 55-72.
+- Scores above 80 MUST be reserved for near-flawless writing. If there are ANY grammar errors or word repetitions, do NOT score above 78.
+- DO NOT reward effort or length. Only reward quality and accuracy.
+- Be honest. Students need accurate feedback to improve.
+
+## OUTPUT FORMAT (return ONLY valid JSON, no other text):
+{
+  "score": <C1+C2+C3+C4 integer 0-100>,
+  "breakdown": { "taskResponse": <0-25>, "coherence": <0-25>, "lexical": <0-25>, "grammar": <0-25> },
+  "feedback": "Nhận xét tổng quát bằng tiếng Việt, nêu rõ điểm mạnh và điểm yếu chính...",
+  "strengths": ["điểm tốt cụ thể 1", "điểm tốt cụ thể 2"],
+  "improvements": ["điểm cần cải thiện cụ thể 1", "điểm cần cải thiện cụ thể 2"],
+  "grammarErrors": [
     {
-      "score": number (0-100),
-      "feedback": "Nhận xét tổng quát bằng tiếng Việt...",
-      "strengths": ["điểm tốt 1", "điểm tốt 2", ...],
-      "improvements": ["điểm cần cải thiện 1", "điểm cần cải thiện 2", ...],
-      "grammarErrors": [
-        {
-          "original": "đoạn văn bản gốc có lỗi",
-          "correction": "đoạn văn bản đã sửa lại",
-          "explanation": "giải thích lý do sửa bằng tiếng Việt"
-        }
-      ]
+      "original": "câu/cụm từ gốc có lỗi",
+      "correction": "câu/cụm từ đã sửa",
+      "explanation": "giải thích ngắn gọn bằng tiếng Việt"
     }
-  `
+  ]
+}
+`
 
   const userPrompt = `
     Đề bài (Prompt): ${prompt}

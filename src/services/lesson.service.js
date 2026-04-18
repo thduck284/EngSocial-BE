@@ -3,6 +3,7 @@ import { LessonDTO, LessonDetailDTO, UserLessonProgressDTO, UserSkillStatsDTO } 
 import { getPagination, getPaginationQuery } from '../utils/index.js'
 import { generateUniqueSlug } from '../utils/slug.js'
 import * as aiService from './ai.service.js'
+import * as mockTestService from './mockTest.service.js'
 
 /**
  * Get all lessons with filters and pagination
@@ -125,7 +126,7 @@ export const startLesson = async (userId, lessonId) => {
 /**
  * Submit answers for a lesson
  */
-export const submitAnswers = async (userId, lessonId, { answers, timeSpent }) => {
+export const submitAnswers = async (userId, lessonId, { answers, timeSpent, isMockTest }) => {
   const lesson = await Lesson.findById(lessonId)
   if (!lesson) throw new Error('LESSON_NOT_FOUND')
 
@@ -136,6 +137,8 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent }) =>
       maxScore: lesson.questions.reduce((sum, q) => sum + (q.points || 10), 0),
     })
   }
+  
+  progress.isMockTest = !!isMockTest
 
   // Grade answers
   let score = 0
@@ -242,7 +245,7 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent }) =>
 /**
  * Submit writing for a lesson
  */
-export const submitWriting = async (userId, lessonId, { content, wordCount, timeSpent = 0 }) => {
+export const submitWriting = async (userId, lessonId, { content, wordCount, timeSpent = 0, isMockTest }) => {
   const lesson = await Lesson.findById(lessonId)
   if (!lesson || lesson.skill !== 'writing') throw new Error('LESSON_NOT_FOUND')
 
@@ -252,6 +255,8 @@ export const submitWriting = async (userId, lessonId, { content, wordCount, time
       userId, lessonId, status: 'in_progress', startedAt: new Date(),
     })
   }
+  
+  progress.isMockTest = !!isMockTest
 
   progress.submission = {
     content,
@@ -305,7 +310,7 @@ export const submitWriting = async (userId, lessonId, { content, wordCount, time
  * Get user progress for all lessons (or filter by skill)
  */
 export const getUserProgress = async (userId, { skill, status, category, page = 1, limit = 10 }) => {
-  const filter = { userId }
+  const filter = { userId, isMockTest: { $ne: true } }
   if (status) filter.status = status
 
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
@@ -493,6 +498,7 @@ export const addLessonReview = async (userId, lessonId, { rating, comment }) => 
 export const getAllLessonResults = async (lessonId, { page = 1, limit = 100 }) => {
   const filter = { 
     lessonId, 
+    isMockTest: { $ne: true },
     $or: [
       { status: 'completed' },
       { status: 'under_review' },
@@ -629,6 +635,9 @@ export const gradeUserWriting = async (lessonId, userId, { score, feedback }) =>
     timeSpent: progress.timeSpent || 0
   })
 
+  // Update Mock Test session status if this part is graded
+  await mockTestService.updateSessionStatusIfCompleted(progress._id)
+
   return progress
 }
 /**
@@ -659,6 +668,7 @@ export const aiGradeWriting = async (lessonId, userId) => {
   progress.submission.aiStrengths = aiResult.strengths || []
   progress.submission.aiImprovements = aiResult.improvements || []
   progress.submission.aiGrammarErrors = aiResult.grammarErrors || []
+  progress.submission.aiBreakdown = aiResult.breakdown || null
 
   // Also update last attempt in history
   if (progress.attemptHistory.length > 0) {
@@ -668,6 +678,7 @@ export const aiGradeWriting = async (lessonId, userId) => {
     lastAttempt.submission.aiStrengths = aiResult.strengths || []
     lastAttempt.submission.aiImprovements = aiResult.improvements || []
     lastAttempt.submission.aiGrammarErrors = aiResult.grammarErrors || []
+    lastAttempt.submission.aiBreakdown = aiResult.breakdown || null
   }
 
   await progress.save()

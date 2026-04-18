@@ -579,13 +579,13 @@ export const completeLesson = async (req, res, next) => {
 export const submitLessonAnswers = async (req, res, next) => {
   try {
     const { id } = req.params
-    const { answers = [], timeSpent = 0 } = req.body || {}
+    const { answers = [], timeSpent = 0, isMockTest = false } = req.body || {}
     const filter = mongoose.isValidObjectId(id) ? { _id: id } : { slug: id }
     const lesson = await Lesson.findOne(filter).select('_id').lean()
     if (!lesson) {
       return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
     }
-    const progress = await lessonService.submitAnswers(req.userId, lesson._id.toString(), { answers, timeSpent })
+    const progress = await lessonService.submitAnswers(req.userId, lesson._id.toString(), { answers, timeSpent, isMockTest })
     const latest = await UserLessonProgress.findOne({
       userId: req.userId,
       lessonId: lesson._id,
@@ -610,7 +610,7 @@ export const submitLessonAnswers = async (req, res, next) => {
 export const submitWritingLesson = async (req, res, next) => {
   try {
     const { id } = req.params
-    const { content = '', wordCount, timeSpent = 0 } = req.body || {}
+    const { content = '', wordCount, timeSpent = 0, isMockTest = false } = req.body || {}
     const filter = mongoose.isValidObjectId(id) ? { _id: id } : { slug: id }
     const lesson = await Lesson.findOne(filter).select('_id').lean()
     if (!lesson) {
@@ -620,6 +620,7 @@ export const submitWritingLesson = async (req, res, next) => {
       content,
       wordCount,
       timeSpent,
+      isMockTest
     })
     return sendSuccess(res, { data: progress }, req)
   } catch (error) {

@@ -4,6 +4,7 @@ import { FriendshipDTO } from '../dto/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
 import { isElasticsearchEnabled } from '../config/elasticsearch/client.js'
 import { searchUserIds } from '../config/elasticsearch/userSearch.service.js'
+import { isUserOnline } from '../config/socket.js'
 
 /**
  * Send friend request
@@ -100,15 +101,17 @@ export const getFriends = async (userId, { page = 1, limit = 20 }) => {
 
   const friends = friendships.map(f => {
     const friendUser = f.userId._id.toString() === userId ? f.friendId : f.userId
+    const fid = friendUser._id.toString()
     return {
       friendshipId: f._id.toString(),
       user: {
-        id: friendUser._id.toString(),
+        id: fid,
         name: friendUser.name,
         avatar: friendUser.avatar,
         level: friendUser.level,
         totalXp: friendUser.totalXp,
         lastActiveDate: friendUser.lastActiveDate,
+        online: isUserOnline(fid), // REAL-TIME CHECK
       },
       acceptedAt: f.acceptedAt,
     }
@@ -265,6 +268,7 @@ export const searchUsersForFriends = async (currentUserId, { q = '', page = 1, l
           level: u.level,
           totalXp: u.totalXp,
           friendStatus,
+          online: isUserOnline(uid),
         }
         if (friendshipIdByFriendId[uid]) out.friendshipId = friendshipIdByFriendId[uid]
         if (friendStatus === 'pending' && pendingSentByMeByFriendId[uid] !== undefined) {
@@ -326,6 +330,7 @@ export const searchUsersForFriends = async (currentUserId, { q = '', page = 1, l
       level: u.level,
       totalXp: u.totalXp,
       friendStatus,
+      online: isUserOnline(uid),
     }
     if (friendshipIdByFriendId[uid]) out.friendshipId = friendshipIdByFriendId[uid]
     if (friendStatus === 'pending' && pendingSentByMeByFriendId[uid] !== undefined) {

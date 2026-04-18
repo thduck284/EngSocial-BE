@@ -92,6 +92,8 @@ const lessonSchema = new mongoose.Schema({
       max: Number,
     },
     sampleAnswer: String,
+    sampleAnswerVi: String,
+    promptVi: String,
   },
   
   questions: [questionSchema],
