@@ -1,0 +1,548 @@
+========================================================================================
+  UC-1.63 — Xem danh sách nhóm học tập
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.63 |
+| Tên Use Case                                           | Xem danh sách nhóm học tập |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập xem các nhóm chat gắn với khu nhóm học tập trên |
+|                                                        | Dashboard (tiêu đề theo bản dịch `dashboard.studyGroups`), mở modal danh sách đầy đủ nếu có, |
+|                                                        | và chọn một nhóm để chuyển sang màn hình Tin nhắn với cuộc trò chuyện tương ứng. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập. |
+|                                                        | 2.Người dùng mở trang Dashboard (hoặc trang tích hợp cùng hook tải danh sách nhóm chat). |
+| Hậu điều kiện                                          | 1.Danh sách nhóm chat học tập hiển thị đúng theo phản hồi thành công từ máy chủ (sau khi lọc các nhóm chat). |
+|                                                        | 2.Khi người dùng chọn một nhóm, ứng dụng điều hướng tới luồng Tin nhắn đúng mã cuộc trò chuyện. |
+| Luồng cơ bản                                           | 1.Người dùng mở Dashboard. |
+|                                                        | 2.Hệ thống (Frontend) gửi yêu cầu lấy danh sách chat đến máy chủ. |
+|                                                        | 3.Hệ thống (Backend) trả về danh sách chat. |
+|                                                        | 4.Hệ thống (Frontend) lọc các mục là nhóm chat; Hệ thống hiển thị thẻ nhóm (tên, ảnh, số thành viên, trạng thái online — tuỳ thiết kế). |
+|                                                        | 5.(Tuỳ thiết kế) Người dùng nhấn tiêu đề khu nhóm học tập để mở modal danh sách đầy đủ; Hệ thống hiển thị cùng nguồn dữ liệu đã lọc. |
+|                                                        | 6.Người dùng chọn một nhóm (từ sidebar hoặc trong modal). |
+|                                                        | 7.Hệ thống (Frontend) điều hướng người dùng đến trang Tin nhắn với đường dẫn cuộc trò chuyện tương ứng. |
+|                                                        | 8.(Tuỳ thiết kế) Người dùng kéo làm mới hoặc quay lại Dashboard; Hệ thống (Frontend) gửi lại yêu cầu lấy danh sách đến máy chủ. |
+|                                                        | 9.Hệ thống (Backend) trả về dữ liệu mới; Hệ thống cập nhật danh sách trên giao diện. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (2a) Không tải được danh sách chat lần đầu: |
+|                                                        |   2a1.Hệ thống hiển thị thông báo lỗi hoặc danh sách rỗng theo chính sách giao diện. |
+|                                                        |   2a2.Người dùng thử tải lại trang hoặc thử lại sau. |
+|                                                        | (8a) Làm mới thất bại: Hệ thống hiển thị thông báo lỗi; dữ liệu đã hiển thị có thể giữ nguyên. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.64 — Xem danh sách chat trong Tin nhắn
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.64 |
+| Tên Use Case                                           | Xem danh sách chat |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập xem danh sách chat trên trang Tin nhắn và chuyển |
+|                                                        | giữa các chế độ lọc **Tất cả**, **Chưa đọc**, **Nhóm**; dữ liệu do máy chủ trả về, phần lọc tab do giao diện áp dụng. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập. |
+|                                                        | 2.Người dùng mở trang Tin nhắn (đường dẫn `/messages` hoặc tương đương). |
+| Hậu điều kiện                                          | 1.Danh sách chat (tin cuối, thời gian, số chưa đọc — tuỳ thiết kế) hiển thị đúng theo phản hồi thành công từ máy chủ. |
+|                                                        | 2.Sau khi đổi tab, danh sách hiển thị khớp bộ lọc tab đang chọn. |
+| Luồng cơ bản                                           | 1.Người dùng mở trang Tin nhắn. |
+|                                                        | 2.Hệ thống (Frontend) gửi yêu cầu lấy danh sách chat đến máy chủ. |
+|                                                        | 3.Hệ thống (Backend) trả về danh sách chat. |
+|                                                        | 4.Hệ thống hiển thị danh sách và huy hiệu chưa đọc (nếu có). |
+|                                                        | 5.Người dùng chọn tab **Tất cả**, **Chưa đọc** hoặc **Nhóm**. |
+|                                                        | 6.Hệ thống (Frontend) lọc và hiển thị lại danh sách theo quy tắc tab (ví dụ tab Nhóm: các nhóm chat và trạng thái chưa đọc — tuỳ thiết kế). |
+|                                                        | 7.(Tuỳ thiết kế) Người dùng kéo làm mới danh sách; Hệ thống (Frontend) gửi yêu cầu mới đến máy chủ. |
+|                                                        | 8.Hệ thống (Backend) trả về dữ liệu; Hệ thống cập nhật danh sách trên giao diện. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (2a) Không tải được danh sách lần đầu: |
+|                                                        |   2a1.Hệ thống hiển thị thông báo lỗi hoặc trạng thái tải. |
+|                                                        |   2a2.Người dùng thử tải lại. |
+|                                                        | (7a) Làm mới danh sách thất bại: Hệ thống hiển thị thông báo lỗi; danh sách cũ (nếu có) giữ nguyên. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.65 — Tìm chat hoặc bạn bè rồi mở cuộc trò chuyện
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.65 |
+| Tên Use Case                                           | Tìm chat hoặc bạn bè rồi mở cuộc trò chuyện |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập dùng ô tìm kiếm trên trang Tin nhắn để lọc danh sách chat cục bộ |
+|                                                        | hoặc xem gợi ý bạn bè; khi chọn một bạn, hệ thống tạo hoặc lấy chat riêng một-một và mở luồng tin nhắn. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập. |
+|                                                        | 2.Người dùng đang ở trang Tin nhắn. |
+| Hậu điều kiện                                          | 1.Cuộc trò chuyện được chọn hiển thị với luồng tin tương ứng. |
+|                                                        | 2.Địa chỉ hoặc tham số điều hướng (ví dụ tham số `with`) phản ánh cuộc trò chuyện đang mở — tuỳ thiết kế ứng dụng. |
+| Luồng cơ bản                                           | 1.Người dùng nhập từ khóa vào ô tìm kiếm chat / bạn bè. |
+|                                                        | 2.Hệ thống (Frontend) lọc danh sách chat đang có hoặc gửi yêu cầu tìm bạn đến máy chủ (tuỳ triển khai). |
+|                                                        | 3.Hệ thống hiển thị kết quả khớp (danh sách chat hoặc mục bạn bè). |
+|                                                        | 4.Người dùng chọn một cuộc trò chuyện trong kết quả. |
+|                                                        | 5.Hệ thống (Frontend) điều hướng tới luồng chat đã chọn. |
+|                                                        | 6.(Nhánh bạn bè) Người dùng chọn một bạn từ khu gợi ý: Hệ thống (Frontend) gửi yêu cầu lấy hoặc tạo chat riêng một-một với người đó đến máy chủ. |
+|                                                        | 7.Hệ thống (Backend) trả về thông tin cuộc trò chuyện; Hệ thống mở luồng tin nhắn. |
+| Luồng thay thế                                         | (4a) Người dùng chỉ chọn cuộc trò chuyện đã có sẵn trong danh sách (không qua gợi ý bạn): thực hiện từ bước 5. |
+| Luồng ngoại lệ                                         | (2a) Không có kết quả tìm: Hệ thống hiển thị trạng thái rỗng; người dùng chỉnh lại từ khóa. |
+|                                                        | (6a) Không tạo hoặc không mở được cuộc trò chuyện: Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.66 — Tạo nhóm chat
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.66 |
+| Tên Use Case                                           | Tạo nhóm chat |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập tạo nhóm chat mới từ trang Tin nhắn (biểu mẫu đặt tên, |
+|                                                        | ảnh đại diện tuỳ chọn, chọn thành viên); máy chủ tạo nhóm chat. Khác UC-1.24 (nhóm cộng đồng `/api/groups`). |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập. |
+|                                                        | 2.Người dùng đang ở trang Tin nhắn và có thể mở biểu mẫu tạo nhóm chat. |
+| Hậu điều kiện                                          | 1.Nhóm chat mới được ghi nhận trên máy chủ. |
+|                                                        | 2.Giao diện chuyển sang luồng chat của nhóm mới hoặc cập nhật danh sách chat kèm thông báo thành công — tuỳ thiết kế. |
+| Luồng cơ bản                                           | 1.Người dùng chọn thao tác tạo nhóm chat trên trang Tin nhắn. |
+|                                                        | 2.Hệ thống hiển thị biểu mẫu (tên nhóm, ảnh nhóm tuỳ chọn, danh sách chọn thành viên). |
+|                                                        | 3.Người dùng điền thông tin và chọn ít nhất số thành viên tối thiểu theo quy tắc giao diện. |
+|                                                        | 4.Người dùng xác nhận tạo nhóm. |
+|                                                        | 5.Hệ thống (Frontend) kiểm tra hợp lệ cục bộ (nếu có); gửi yêu cầu tạo nhóm chat đến máy chủ. |
+|                                                        | 6.Hệ thống (Backend) tạo nhóm và trả về dữ liệu cuộc trò chuyện. |
+|                                                        | 7.Hệ thống điều hướng vào luồng chat nhóm mới hoặc làm mới danh sách và mở cuộc trò chuyện vừa tạo. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (5a) Tạo nhóm thất bại (thiếu thành viên, vượt giới hạn, lỗi máy chủ, …): Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.67 — Mở nhóm chat và xem lịch sử tin nhắn
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.67 |
+| Tên Use Case                                           | Mở nhóm chat và xem lịch sử tin nhắn |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập mở một nhóm chat, tải lịch sử tin nhắn (có phân trang theo con trỏ tin cũ), |
+|                                                        | đánh dấu đã đọc khi xem, và tải thêm tin cũ khi cuộn — đồng bộ qua máy chủ. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập và là thành viên của nhóm chat. |
+|                                                        | 2.Người dùng đã chọn nhóm chat từ danh sách (hoặc sau khi tạo nhóm thành công). |
+| Hậu điều kiện                                          | 1.Luồng tin nhắn hiển thị đúng theo phản hồi thành công từ máy chủ. |
+|                                                        | 2.Trạng thái đã đọc / huy hiệu chưa đọc phản ánh sau khi máy chủ xác nhận (tuỳ chính sách). |
+| Luồng cơ bản                                           | 1.Người dùng chọn một nhóm chat trong danh sách bên trái. |
+|                                                        | 2.Hệ thống (Frontend) hiển thị trạng thái đang tải luồng chat (nếu có). |
+|                                                        | 3.Hệ thống (Frontend) gửi yêu cầu lấy danh sách tin nhắn (trang đầu, kèm giới hạn số tin) đến máy chủ. |
+|                                                        | 4.Hệ thống (Backend) trả về danh sách tin nhắn. |
+|                                                        | 5.Hệ thống hiển thị luồng tin trong cuộc trò chuyện. |
+|                                                        | 6.Hệ thống (Frontend) gửi yêu cầu đánh dấu đã đọc khi người dùng đã xem luồng chat (tuỳ chính sách sản phẩm). |
+|                                                        | 7.(Tuỳ thiết kế) Người dùng cuộn lên để xem tin cũ hơn; Hệ thống (Frontend) gửi yêu cầu lấy thêm tin với con trỏ phân trang. |
+|                                                        | 8.Hệ thống (Backend) trả về thêm tin; Hệ thống nối tin vào luồng theo quy ước giao diện. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (3a) Không tải được lịch sử tin lần đầu (không có quyền, cuộc trò chuyện không tồn tại, …): Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (7a) Tải thêm tin cũ thất bại: Hệ thống hiển thị thông báo lỗi; các tin đã có giữ nguyên. |
+|                                                        | (6a) Đánh dấu đã đọc thất bại: Hệ thống vẫn hiển thị tin; huy hiệu chưa đọc có thể giữ nguyên. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.68 — Gửi tin nhắn (văn bản, tệp đính kèm, GIF)
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.68 |
+| Tên Use Case                                           | Gửi tin nhắn (văn bản, tệp đính kèm, GIF) |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập gửi tin nhắn văn bản, đính kèm tệp (ảnh, video, tài liệu — tuỳ cấu hình), |
+|                                                        | hoặc gửi GIF; nội dung được lưu qua máy chủ và hiển thị trong luồng chat. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập và đang mở một cuộc trò chuyện cho phép gửi tin. |
+|                                                        | 2.Người dùng không ở trạng thái bị cấm trả lời trong cuộc trò chuyện đó (tuỳ chính sách sản phẩm). |
+| Hậu điều kiện                                          | 1.Tin mới xuất hiện trong luồng với trạng thái do máy chủ trả về. |
+|                                                        | 2.Dòng tin cuối trên danh sách chat cập nhật theo tin vừa gửi. |
+| Luồng cơ bản                                           | 1.Người dùng soạn nội dung trong ô nhập tin nhắn. |
+|                                                        | 2.(Tuỳ chọn) Người dùng đính kèm tệp hoặc chọn GIF / chèn emoji từ bảng chọn. |
+|                                                        | 3.Người dùng chọn gửi tin (nút gửi hoặc phím tắt). |
+|                                                        | 4.Hệ thống (Frontend) kiểm tra hợp lệ cục bộ (độ dài, loại tệp — tuỳ quy tắc giao diện). |
+|                                                        | 5.Hệ thống (Frontend) gửi yêu cầu gửi tin đến máy chủ (dạng multipart nếu có tệp, hoặc JSON kèm liên kết đính kèm nếu chỉ GIF). |
+|                                                        | 6.Hệ thống (Backend) lưu tin và trả về bản ghi tin. |
+|                                                        | 7.Hệ thống cập nhật luồng chat và (tuỳ) cập nhật danh sách chat; các thành viên khác nhận tin theo cơ chế realtime hoặc làm mới — tuỳ triển khai. |
+| Luồng thay thế                                         | (2a) Chỉ gửi GIF không kèm văn bản: Hệ thống (Frontend) gửi yêu cầu với danh sách đính kèm dạng URL theo quy ước API. |
+| Luồng ngoại lệ                                         | (5a) Gửi tin thất bại (dung lượng, định dạng, bị chặn, …): Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.69 — Chỉnh sửa tin nhắn
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.69 |
+| Tên Use Case                                           | Chỉnh sửa tin nhắn |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập chỉnh sửa nội dung (và tuỳ chính sách, tệp đính kèm) của tin do chính mình gửi; |
+|                                                        | cập nhật đồng bộ qua máy chủ. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập và đang xem luồng tin của cuộc trò chuyện. |
+|                                                        | 2.Tin nhắn do người dùng hiện tại gửi và giao diện cho phép thao tác chỉnh sửa. |
+| Hậu điều kiện                                          | Nội dung tin trên giao diện khớp phản hồi thành công từ máy chủ sau khi cập nhật. |
+| Luồng cơ bản                                           | 1.Người dùng mở menu thao tác trên một tin của mình và chọn chỉnh sửa. |
+|                                                        | 2.Hệ thống đưa nội dung tin vào chế độ soạn sửa (ô nhập tin / trạng thái đang sửa — tuỳ thiết kế). |
+|                                                        | 3.Người dùng chỉnh nội dung và (tuỳ) gỡ tệp đính kèm khi sửa. |
+|                                                        | 4.Người dùng xác nhận gửi bản cập nhật. |
+|                                                        | 5.Hệ thống (Frontend) gửi yêu cầu cập nhật tin nhắn đến máy chủ. |
+|                                                        | 6.Hệ thống (Backend) lưu và trả về tin đã cập nhật. |
+|                                                        | 7.Hệ thống cập nhật luồng hiển thị và thoát chế độ chỉnh sửa. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (5a) Cập nhật thất bại (hết hạn cho phép sửa, tin đã bị thu hồi, không đủ quyền, …): Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.70 — Chuyển tiếp tin nhắn
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.70 |
+| Tên Use Case                                           | Chuyển tiếp tin nhắn |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập chuyển tiếp nội dung (và tệp đính kèm nếu có) của một tin sang |
+|                                                        | cuộc trò chuyện khác được chọn từ danh sách đích; thao tác thực hiện qua máy chủ. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập và đang mở luồng tin của một cuộc trò chuyện nguồn. |
+|                                                        | 2.Tồn tại tin nhắn hợp lệ để chuyển tiếp và có ít nhất một cuộc trò chuyện đích khả dụng. |
+| Hậu điều kiện                                          | 1.Tin (hoặc bản sao nội dung) xuất hiện ở cuộc trò chuyện đích theo phản hồi thành công từ máy chủ. |
+|                                                        | 2.Giao diện chuyển tiếp đóng sau khi hoàn tất (tuỳ thiết kế). |
+| Luồng cơ bản                                           | 1.Người dùng mở menu trên tin và chọn chuyển tiếp. |
+|                                                        | 2.Hệ thống (Frontend) gửi yêu cầu lấy danh sách chat dùng cho chuyển tiếp đến máy chủ (phân trang tuỳ thiết kế). |
+|                                                        | 3.Hệ thống (Backend) trả về danh sách chat đích. |
+|                                                        | 4.Hệ thống hiển thị danh sách trong hộp thoại chọn đích. |
+|                                                        | 5.Người dùng chọn một cuộc trò chuyện đích và xác nhận. |
+|                                                        | 6.Hệ thống (Frontend) gửi yêu cầu gửi tin (nội dung / đính kèm chuyển tiếp) đến máy chủ cho cuộc trò chuyện đích. |
+|                                                        | 7.Hệ thống (Backend) lưu tin tại đích; Hệ thống đóng hộp thoại và (tuỳ) làm mới danh sách chat. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (2a) Không tải được danh sách chat đích: |
+|                                                        |   2a1.Hệ thống hiển thị thông báo lỗi. |
+|                                                        |   2a2.Người dùng thử đóng và mở lại chuyển tiếp. |
+|                                                        | (6a) Gửi chuyển tiếp thất bại: Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.71 — Tương tác tin nhắn
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.71 |
+| Tên Use Case                                           | Tương tác tin nhắn |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập tương tác với tin nhắn: thả hoặc đổi reaction trên một tin, |
+|                                                        | xem danh sách người dùng đã reaction (chi tiết theo emoji hoặc theo tin — tuỳ thiết kế) — đồng bộ qua máy chủ. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập và đang xem luồng tin của cuộc trò chuyện. |
+|                                                        | 2.Tin nhắn đích cho phép thao tác reaction theo chính sách sản phẩm. |
+| Hậu điều kiện                                          | Cụm reaction hiển thị trên tin khớp phản hồi thành công từ máy chủ. |
+| Luồng cơ bản                                           | 1.Người dùng mở bảng chọn reaction trên một tin nhắn. |
+|                                                        | 2.Người dùng chọn biểu tượng cảm xúc. |
+|                                                        | 3.Hệ thống (Frontend) gửi yêu cầu cập nhật reaction đến máy chủ. |
+|                                                        | 4.Hệ thống (Backend) cập nhật và trả về trạng thái reaction của tin. |
+|                                                        | 5.Hệ thống cập nhật hiển thị reaction trên bong bóng tin. |
+|                                                        | 6.(Tuỳ thiết kế) Người dùng mở màn hình chi tiết reaction; Hệ thống hiển thị danh sách người dùng theo emoji hoặc theo tin. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (3a) Cập nhật reaction thất bại: Hệ thống hiển thị thông báo theo máy chủ hoặc hoàn tác thay đổi tạm trên giao diện. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.72 — Xóa hoặc thu hồi một tin nhắn
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.72 |
+| Tên Use Case                                           | Xóa hoặc thu hồi một tin nhắn |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập xóa tin nhắn chỉ phía mình hoặc thu hồi/xóa với mọi người |
+|                                                        | trong phạm vi cho phép; máy chủ cập nhật trạng thái tin. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập và đang xem luồng tin. |
+|                                                        | 2.Menu thao tác trên tin vẫn hiển thị mục xóa / thu hồi theo quyền và chính sách. |
+| Hậu điều kiện                                          | Tin biến mất khỏi luồng hoặc hiển thị trạng thái đã thu hồi / đã xóa theo phản hồi máy chủ; tin cuối của cuộc trò chuyện cập nhật nếu cần. |
+| Luồng cơ bản                                           | 1.Người dùng mở menu thao tác trên một tin nhắn. |
+|                                                        | 2.Người dùng chọn xóa phía mình hoặc xóa/thu hồi với mọi người (tuỳ lựa chọn hiển thị). |
+|                                                        | 3.(Tuỳ thiết kế) Hệ thống hiển thị hộp thoại xác nhận; người dùng xác nhận. |
+|                                                        | 4.Hệ thống (Frontend) gửi yêu cầu xóa tin đến máy chủ kèm phạm vi theo lựa chọn. |
+|                                                        | 5.Hệ thống (Backend) xử lý và trả kết quả. |
+|                                                        | 6.Hệ thống cập nhật luồng tin và (tuỳ) cập nhật dòng tin cuối trên danh sách chat. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (4a) Xóa hoặc thu hồi thất bại (không đủ quyền, tin không còn, …): Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.73 — Xóa toàn bộ tin nhắn phía tôi trong cuộc trò chuyện
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.73 |
+| Tên Use Case                                           | Xóa toàn bộ tin nhắn phía tôi trong cuộc trò chuyện |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập xóa toàn bộ lịch sử tin nhắn **phía bản thân** trong một cuộc trò chuyện |
+|                                                        | sau khi xác nhận; thao tác thực hiện qua máy chủ. Ghi chú triển khai FE hiện tại: luồng gọi API |
+|                                                        | xóa toàn bộ có thể chỉ bật cho chat riêng một-một có đủ thông tin đối phương; nhóm chat cần mở rộng nếu BE/FE hỗ trợ đầy đủ. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập và đang trong một cuộc trò chuyện. |
+|                                                        | 2.Giao diện hiển thị thao tác xóa toàn bộ tin phía người dùng cho loại cuộc trò chuyện hiện tại. |
+| Hậu điều kiện                                          | Luồng tin phía người dùng được làm sạch hoặc tải lại theo trạng thái sau khi máy chủ xử lý thành công. |
+| Luồng cơ bản                                           | 1.Người dùng mở menu cài đặt cuộc trò chuyện hoặc menu tương đương trên danh sách / header. |
+|                                                        | 2.Người dùng chọn xóa toàn bộ tin nhắn phía mình. |
+|                                                        | 3.Hệ thống hiển thị hộp thoại xác nhận; người dùng xác nhận. |
+|                                                        | 4.Hệ thống (Frontend) gửi yêu cầu xóa toàn bộ tin phía người dùng đến máy chủ. |
+|                                                        | 5.Hệ thống (Backend) xử lý yêu cầu. |
+|                                                        | 6.Hệ thống (Frontend) tải lại trang tin hoặc làm rỗng luồng theo phản hồi; cập nhật dòng tin cuối trên danh sách chat. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (4a) Máy chủ từ chối hoặc giao diện chưa hỗ trợ thao tác cho loại cuộc trò chuyện (ví dụ nhóm chat): |
+|                                                        |   4a1.Hệ thống hiển thị thông báo theo máy chủ hoặc ẩn mục menu. |
+|                                                        |   4a2.Người dùng hủy thao tác. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.74 — Tắt thông báo cho cuộc trò chuyện
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.74 |
+| Tên Use Case                                           | Tắt thông báo cho cuộc trò chuyện |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập tắt thông báo đẩy/âm thanh cho một cuộc trò chuyện trong khoảng thời gian chọn |
+|                                                        | hoặc bật lại thông báo; thiết lập lưu qua máy chủ. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập. |
+|                                                        | 2.Người dùng đang mở một cuộc trò chuyện cụ thể. |
+| Hậu điều kiện                                          | Trạng thái tắt thông báo (thời điểm hết hạn tắt — tuỳ chọn) khớp phản hồi thành công từ máy chủ. |
+| Luồng cơ bản                                           | 1.Người dùng mở menu trên header luồng chat và chọn tắt thông báo. |
+|                                                        | 2.Hệ thống hiển thị panel chọn thời lượng tắt (ví dụ 1 giờ, 8 giờ, đến khi bật lại — tuỳ bản dịch). |
+|                                                        | 3.Người dùng chọn một mức thời gian. |
+|                                                        | 4.Hệ thống (Frontend) gửi yêu cầu cập nhật cài đặt cuộc trò chuyện đến máy chủ (trường thời điểm tắt thông báo). |
+|                                                        | 5.Hệ thống (Backend) lưu thiết lập và trả kết quả. |
+|                                                        | 6.Hệ thống đóng panel và cập nhật biểu tượng / trạng thái tắt thông báo trên giao diện. |
+| Luồng thay thế                                         | (3a) Người dùng chọn bật lại thông báo khi đang tắt: Hệ thống (Frontend) gửi yêu cầu cập nhật để gỡ trạng thái tắt; Hệ thống cập nhật giao diện. |
+| Luồng ngoại lệ                                         | (4a) Lưu thiết lập thất bại: Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.75 — Tin nhắn tự xóa
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.75 |
+| Tên Use Case                                           | Tin nhắn tự xóa |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập bật chế độ tin nhắn tự xóa theo thời hạn hoặc tắt chế độ; |
+|                                                        | thông số gửi lên máy chủ qua cập nhật cài đặt cuộc trò chuyện. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập. |
+|                                                        | 2.Cuộc trò chuyện hỗ trợ tính năng tin tự xóa theo triển khai sản phẩm. |
+| Hậu điều kiện                                          | Chế độ tin tự xóa trên máy chủ và giao diện đồng bộ sau khi lưu thành công. |
+| Luồng cơ bản                                           | 1.Người dùng mở menu header luồng chat và chọn tin nhắn tự xóa. |
+|                                                        | 2.Hệ thống hiển thị panel chọn thời hạn hoặc tùy chọn tắt hoàn toàn. |
+|                                                        | 3.Người dùng chọn mức thời gian hoặc tắt tính năng. |
+|                                                        | 4.Hệ thống (Frontend) gửi yêu cầu cập nhật cài đặt cuộc trò chuyện đến máy chủ (thời điểm áp dụng và thời lượng — tuỳ schema). |
+|                                                        | 5.Hệ thống (Backend) lưu và trả kết quả. |
+|                                                        | 6.Hệ thống đóng panel và hiển thị trạng thái đã chọn. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (4a) Lưu thiết lập thất bại: Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.76 — Tìm kiếm tin nhắn trong cuộc trò chuyện
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.76 |
+| Tên Use Case                                           | Tìm kiếm tin nhắn trong cuộc trò chuyện |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập tìm nội dung trong luồng tin của cuộc trò chuyện đang mở, xem danh sách kết quả |
+|                                                        | và nhảy tới tin tương ứng trong cuộc trò chuyện. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập. |
+|                                                        | 2.Người dùng đang mở một cuộc trò chuyện có dữ liệu tin (hoặc đã tải một phần lịch sử). |
+| Hậu điều kiện                                          | Kết quả tìm và vị trí cuộn trong luồng khớp thao tác người dùng (theo logic lọc cục bộ hoặc gọi máy chủ — tuỳ triển khai). |
+| Luồng cơ bản                                           | 1.Người dùng mở chức năng tìm kiếm trong cuộc trò chuyện từ menu header. |
+|                                                        | 2.Hệ thống hiển thị ô nhập từ khóa và (tuỳ) khu vực kết quả. |
+|                                                        | 3.Người dùng nhập từ khóa. |
+|                                                        | 4.Hệ thống (Frontend) lọc trên tập tin đã tải hoặc gửi yêu cầu tìm đến máy chủ (nếu có API). |
+|                                                        | 5.Hệ thống hiển thị danh sách kết quả hoặc thông báo không có kết quả. |
+|                                                        | 6.Người dùng chọn một kết quả; Hệ thống cuộn luồng chat tới tin tương ứng và (tuỳ) làm nổi bật tin. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (4a) Lỗi khi gọi máy chủ tìm kiếm (nếu có): Hệ thống hiển thị thông báo lỗi. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.77 — Xem ảnh, video, tệp và liên kết đã chia sẻ
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.77 |
+| Tên Use Case                                           | Xem ảnh, video, tệp và liên kết đã chia sẻ |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập xem các mục ảnh/video, tệp và liên kết đã xuất hiện trong cuộc trò chuyện, |
+|                                                        | tổng hợp trên thanh bên phải; có thể tải thêm từng phần khi danh sách dài. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập. |
+|                                                        | 2.Người dùng đang mở một cuộc trò chuyện và thanh bên đính kèm được bật trên giao diện. |
+| Hậu điều kiện                                          | Các danh sách ảnh/video, tệp và liên kết hiển thị khớp dữ liệu đã tổng hợp từ luồng tin (và tuỳ máy chủ). |
+| Luồng cơ bản                                           | 1.Người dùng mở thanh bên thông tin / phương tiện của cuộc trò chuyện. |
+|                                                        | 2.Hệ thống (Frontend) tổng hợp từ các tin đã tải hoặc gửi yêu cầu bổ sung đến máy chủ (tuỳ triển khai). |
+|                                                        | 3.Hệ thống hiển thị các tab hoặc mục: ảnh & video, tệp, liên kết. |
+|                                                        | 4.Người dùng chuyển giữa các mục hoặc chọn «Xem tất cả» (tuỳ bản dịch). |
+|                                                        | 5.(Tuỳ thiết kế) Người dùng chọn tải thêm; Hệ thống (Frontend) gửi yêu cầu phân trang đến máy chủ nếu có. |
+|                                                        | 6.Hệ thống (Backend) trả dữ liệu; Hệ thống nối thêm mục vào danh sách hiển thị. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (2a) Không có dữ liệu đính kèm: Hệ thống hiển thị trạng thái rỗng. |
+|                                                        | (5a) Tải thêm thất bại: Hệ thống hiển thị thông báo lỗi; mục đã có giữ nguyên. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.78 — Xem phóng to ảnh và tải tệp đính kèm
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.78 |
+| Tên Use Case                                           | Xem phóng to ảnh và tải tệp đính kèm |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập xem ảnh hoặc video đính kèm ở chế độ phóng to và tải xuống |
+|                                                        | tệp đính kèm từ luồng tin thông qua máy chủ hoặc liên kết tải do máy chủ cấp. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập. |
+|                                                        | 2.Tin nhắn có đính kèm xem được hoặc cho phép tải. |
+| Hậu điều kiện                                          | Người dùng xem được nội dung phóng to hoặc nhận được tệp tải về thiết bị (tuỳ trình duyệt). |
+| Luồng cơ bản                                           | 1.Người dùng nhấn vào ảnh hoặc video trong luồng tin. |
+|                                                        | 2.Hệ thống mở lớp xem phóng to (modal toàn màn hình — tuỳ thiết kế). |
+|                                                        | 3.(Tuỳ) Người dùng đóng lớp phóng to; Hệ thống trở lại luồng chat. |
+|                                                        | 4.Với tệp đính kèm: người dùng chọn tải xuống hoặc mở liên kết. |
+|                                                        | 5.Hệ thống (Frontend) gửi yêu cầu lấy liên kết tải hoặc tải trực tiếp theo quy ước API. |
+|                                                        | 6.Hệ thống (Backend) trả liên kết hoặc tệp; trình duyệt thực hiện tải xuống. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (5a) Không tải được tệp hoặc không có quyền: Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.79 — Cập nhật thông tin nhóm chat
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.79 |
+| Tên Use Case                                           | Cập nhật thông tin nhóm chat |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập (theo quyền host/admin) cập nhật tên nhóm, ảnh đại diện nhóm |
+|                                                        | và giới hạn số thành viên tối đa trong màn hình cài đặt nhóm; thay đổi đồng bộ qua máy chủ. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập và đang trong nhóm chat. |
+|                                                        | 2.Người dùng có quyền chỉnh sửa thông tin nhóm theo vai trò và `groupPermissions`. |
+| Hậu điều kiện                                          | Tên, ảnh và giới hạn thành viên hiển thị trên giao diện khớp phản hồi thành công từ máy chủ. |
+| Luồng cơ bản                                           | 1.Người dùng mở màn hình cài đặt nhóm chat. |
+|                                                        | 2.Người dùng chọn tab thông tin nhóm. |
+|                                                        | 3.Người dùng sửa tên, (tuỳ) tải lên ảnh đại diện qua bước upload tệp riêng, (tuỳ) chỉnh số thành viên tối đa. |
+|                                                        | 4.Người dùng chọn lưu. |
+|                                                        | 5.Hệ thống (Frontend) gửi yêu cầu cập nhật cài đặt nhóm đến máy chủ (kèm URL ảnh sau upload nếu có). |
+|                                                        | 6.Hệ thống (Backend) lưu và trả về dữ liệu nhóm đã cập nhật. |
+|                                                        | 7.Hệ thống cập nhật tiêu đề, ảnh và thông tin trên luồng chat và danh sách chat. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (5a) Không đủ quyền hoặc dữ liệu không hợp lệ (tên trống, vượt giới hạn, …): Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.80 — Thêm thành viên vào nhóm chat
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.80 |
+| Tên Use Case                                           | Thêm thành viên vào nhóm chat |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập (theo quyền) mời thêm thành viên từ danh sách bạn bè vào nhóm chat; |
+|                                                        | máy chủ cập nhật danh sách thành viên. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập và đang trong nhóm chat. |
+|                                                        | 2.Người dùng có quyền thêm thành viên theo vai trò và cấu hình quyền nhóm. |
+| Hậu điều kiện                                          | Thành viên mới xuất hiện trong nhóm; số lượng thành viên hiển thị cập nhật theo máy chủ. |
+| Luồng cơ bản                                           | 1.Người dùng mở màn hình cài đặt nhóm và chọn thêm thành viên. |
+|                                                        | 2.Hệ thống hiển thị danh sách bạn bè có thể mời (đã loại thành viên hiện có — tuỳ logic). |
+|                                                        | 3.Người dùng chọn một hoặc nhiều người và xác nhận. |
+|                                                        | 4.Hệ thống (Frontend) gửi yêu cầu thêm thành viên đến máy chủ kèm danh sách định danh người dùng. |
+|                                                        | 5.Hệ thống (Backend) xử lý và trả kết quả. |
+|                                                        | 6.Hệ thống cập nhật danh sách thành viên và (tuỳ) đóng modal. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (4a) Thêm thất bại (nhóm đầy, người bị chặn, không đủ quyền, …): Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.81 — Chặn hoặc bỏ chặn thành viên khỏi nhóm chat
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.81 |
+| Tên Use Case                                           | Chặn hoặc bỏ chặn thành viên khỏi nhóm chat |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập (theo quyền host/admin) chặn thành viên khỏi nhóm chat, xem danh sách |
+|                                                        | thành viên bị chặn và bỏ chặn; có thể kết hợp thao tác loại thành viên khỏi nhóm theo chính sách máy chủ. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập và đang trong nhóm chat. |
+|                                                        | 2.Người dùng có quyền chặn hoặc bỏ chặn theo vai trò và cấu hình quyền nhóm. |
+| Hậu điều kiện                                          | Danh sách thành viên và trạng thái chặn trên giao diện khớp phản hồi thành công từ máy chủ. |
+| Luồng cơ bản                                           | 1.Người dùng mở màn hình cài đặt nhóm và chọn tab chặn thành viên. |
+|                                                        | 2.Hệ thống hiển thị danh sách thành viên có thể chọn để chặn (hoặc danh sách đã chặn — tuỳ thiết kế). |
+|                                                        | 3.Người dùng chọn thành viên cần chặn và xác nhận. |
+|                                                        | 4.Hệ thống (Frontend) gửi yêu cầu chặn thành viên trong nhóm đến máy chủ. |
+|                                                        | 5.Hệ thống (Backend) xử lý và trả kết quả. |
+|                                                        | 6.Hệ thống cập nhật danh sách thành viên và trạng thái trên luồng chat. |
+|                                                        | 7.Người dùng chọn bỏ chặn đối với một thành viên trong danh sách chặn. |
+|                                                        | 8.Hệ thống (Frontend) gửi yêu cầu bỏ chặn đến máy chủ. |
+|                                                        | 9.Hệ thống (Backend) xử lý; Hệ thống cập nhật giao diện. |
+| Luồng thay thế                                         | (1a) Người dùng chọn thao tác loại thành viên (kích) thay cho chặn nếu giao diện gom một nút: Hệ thống (Frontend) gửi yêu cầu theo API tương ứng; Hệ thống cập nhật danh sách. |
+| Luồng ngoại lệ                                         | (4a) Chặn thất bại (không đủ quyền, đối tượng không hợp lệ, …): Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (8a) Bỏ chặn thất bại: Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.82 — Rời nhóm chat
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.82 |
+| Tên Use Case                                           | Rời nhóm chat |
+| Mô tả                                                  | Cho phép người dùng đã đăng nhập rời khỏi một nhóm chat mà mình đang tham gia; sau khi xác nhận, máy chủ |
+|                                                        | cập nhật danh sách thành viên và giao diện điều hướng về danh sách Tin nhắn. |
+| Đối tượng                                              | Người dùng (đã đăng nhập) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập. |
+|                                                        | 2.Người dùng là thành viên của nhóm chat và giao diện cho phép rời nhóm. |
+| Hậu điều kiện                                          | 1.Người dùng không còn trong danh sách thành viên nhóm theo phản hồi máy chủ. |
+|                                                        | 2.Màn hình thoát khỏi luồng chat của nhóm đó và hiển thị danh sách chat (tuỳ điều hướng). |
+| Luồng cơ bản                                           | 1.Người dùng mở menu trên nhóm chat hoặc màn cài đặt nhóm. |
+|                                                        | 2.Người dùng chọn rời nhóm. |
+|                                                        | 3.Hệ thống hiển thị hộp thoại xác nhận; người dùng xác nhận. |
+|                                                        | 4.Hệ thống (Frontend) gửi yêu cầu rời nhóm đến máy chủ. |
+|                                                        | 5.Hệ thống (Backend) xử lý và trả kết quả. |
+|                                                        | 6.Hệ thống (Frontend) điều hướng về trang Tin nhắn, xóa nội dung luồng tin cục bộ và gửi yêu cầu làm mới danh sách chat. |
+|                                                        | 7.Hệ thống (Backend) trả danh sách chat mới (tuỳ luồng); Hệ thống hiển thị danh sách đã cập nhật. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (4a) Rời nhóm thất bại (chính sách không cho chủ rời, lỗi máy chủ, …): Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |
+
+========================================================================================
+  UC-1.83 — Giải tán nhóm chat
+========================================================================================
+
+| Thuộc tính                                             | Nội dung |
+|--------------------------------------------------------|--------------------------------------------------------------------------------|
+| Mã Use Case                                            | UC-1.83 |
+| Tên Use Case                                           | Giải tán nhóm chat |
+| Mô tả                                                  | Cho phép chủ nhóm (host) giải tán nhóm chat; sau khi xác nhận, máy chủ kết thúc nhóm chat và thành viên |
+|                                                        | không còn sử dụng luồng đó. |
+| Đối tượng                                              | Người dùng (đã đăng nhập, chủ nhóm) |
+| Tiền điều kiện                                         | 1.Người dùng đã đăng nhập. |
+|                                                        | 2.Người dùng có vai trò chủ nhóm trong nhóm chat và giao diện hiển thị thao tác giải tán. |
+| Hậu điều kiện                                          | 1.Nhóm chat được kết thúc theo phản hồi thành công từ máy chủ. |
+|                                                        | 2.Giao diện quay về danh sách Tin nhắn; luồng tin của nhóm không còn khả dụng cho thành viên. |
+| Luồng cơ bản                                           | 1.Người dùng mở menu trên header luồng chat hoặc màn cài đặt nhóm. |
+|                                                        | 2.Người dùng chọn giải tán nhóm. |
+|                                                        | 3.Hệ thống hiển thị hộp thoại xác nhận với cảnh báo không hoàn tác; người dùng xác nhận. |
+|                                                        | 4.Hệ thống (Frontend) gửi yêu cầu giải tán nhóm đến máy chủ. |
+|                                                        | 5.Hệ thống (Backend) xử lý và trả kết quả. |
+|                                                        | 6.Hệ thống (Frontend) điều hướng về trang Tin nhắn, xóa trạng thái tin nhắn cục bộ của nhóm và gửi yêu cầu làm mới danh sách chat. |
+|                                                        | 7.Hệ thống (Backend) trả danh sách chat (tuỳ luồng); Hệ thống hiển thị danh sách đã cập nhật. |
+| Luồng thay thế                                         | Không có. |
+| Luồng ngoại lệ                                         | (4a) Giải tán thất bại (không phải chủ nhóm, lỗi máy chủ, …): Hệ thống hiển thị thông báo theo máy chủ. |
+|                                                        | (E1) Lỗi hệ thống hoặc mạng; 401: xử lý theo luồng chung ứng dụng. |

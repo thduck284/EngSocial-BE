@@ -2,6 +2,7 @@ import mongoose from 'mongoose'
 import { Friendship, User } from '../models/index.js'
 import { FriendshipDTO } from '../dto/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
+import { incrementPeriodicQuestsForCategory } from './userPeriodicQuest.service.js'
 import { isElasticsearchEnabled } from '../config/elasticsearch/client.js'
 import { searchUserIds } from '../config/elasticsearch/userSearch.service.js'
 import { isUserOnline } from '../config/socket.js'
@@ -49,6 +50,12 @@ export const acceptFriendRequest = async (userId, friendshipId) => {
   friendship.status = 'accepted'
   friendship.acceptedAt = new Date()
   await friendship.save()
+  try {
+    await incrementPeriodicQuestsForCategory(friendship.userId, 'friends', 1)
+    await incrementPeriodicQuestsForCategory(friendship.friendId, 'friends', 1)
+  } catch (e) {
+    console.warn('[periodicQuest] friends bump:', e?.message)
+  }
   return new FriendshipDTO(friendship)
 }
 

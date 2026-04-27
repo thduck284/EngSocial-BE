@@ -1,0 +1,591 @@
+---------------------------------------------------------
+1. AUTHENTICATION MODULE (Xác thực) - Base path: /api/auth
+---------------------------------------------------------
+POST   /api/auth/register           : Đăng ký tài khoản mới
+  => Req: { displayName, email, password, passwordConfirm }
+  => Res: { user: { _id, name, email, role, avatar, level, xp }, token }
+POST   /api/auth/login              : Đăng nhập bằng Email/Mật khẩu
+  => Req: { email, password }
+  => Res: { user: { _id, name, email, role, avatar, level, xp }, token }
+POST   /api/auth/social/google      : Đăng nhập bằng Google (ID token từ Google Sign-In)
+  => Req: { idToken } (EngSocial-FE gửi field `idToken`)
+  => Res: { user: { _id, name, email, role, avatar, level, xp }, token }
+POST   /api/auth/social/facebook    : Đăng nhập bằng Facebook
+  => Req: { accessToken }
+  => Res: { user: { _id, name, email, role, avatar, level, xp }, token }
+POST   /api/auth/verify-email       : (Tuỳ chọn) Xác thực email / OTP — EngSocial-FE có hằng số `/auth/verify-email`; kiểm tra route đã mount trên BE trước khi gọi
+  => Req: { token hoặc otp, email? } (theo triển khai backend)
+  => Res: {}
+POST   /api/auth/refresh            : Cấp lại Access Token mới
+  => Req: { refreshToken }
+  => Res: { accessToken, refreshToken }
+POST   /api/auth/logout             : Đăng xuất
+  => Req: { refreshToken }
+  => Res: {}
+GET    /api/auth/me                 : Lấy thông tin user hiện hành
+  => Req: {}
+  => Res: { user: { _id, name, email, avatar, bio, phone, address, dateOfBirth, gender, role, level, xp, totalXp, status, lastActiveDate, lastAccessedAt, preferences: { language, theme, notifications, emailNotifications, dailyGoalMinutes } } }
+PATCH  /api/auth/preferences        : Cập nhật tùy chọn
+  => Req: { language, theme, notifications, emailNotifications, dailyGoalMinutes }
+  => Res: { user: { _id, name, preferences: { language, theme, notifications, emailNotifications, dailyGoalMinutes } } }
+POST   /api/auth/forgot-password    : Quên mật khẩu
+  => Req: { email }
+  => Res: {}
+POST   /api/auth/reset-password     : Đặt lại mật khẩu
+  => Req: { token, newPassword }
+  => Res: {}
+
+---------------------------------------------------------
+2. USER MODULE (Quản lý User) - Base path: /api/user
+---------------------------------------------------------
+GET    /api/user/profile            : Lấy thông tin User cá nhân 
+  => Req: {}
+  => Res: { profile: { _id, name, bio, phone, address, dateOfBirth, gender, avatar, status } }
+PATCH  /api/user/profile            : Cập nhật thông tin Profile
+  => Req: { name, bio, phone, address, dateOfBirth, gender }
+  => Res: { profile: { _id, name, bio, phone, address, dateOfBirth, gender, avatar, status } }
+GET    /api/user/profile/:userId    : Xem profile công khai của user khác
+  => Req: {}
+  => Res: { profile: { _id, name, avatar, bio, level, totalXp, activeStatus } }
+GET    /api/user/stats              : Xem thống kê (level, điểm kinh nghiệm)
+  => Req: {}
+  => Res: { stats: { level, xp, totalXp, streak, longestStreak, nextLevelXp } }
+GET    /api/user/skills-profile     : Lấy biểu đồ điểm skill 
+  => Req: {}
+  => Res: { skillsProfile: { skills: { reading, writing, listening, speaking, grammar, vocabulary }, goals: [], activeView, updatedAt } }
+PATCH  /api/user/skills-profile     : Cập nhật thông số skill
+  => Req: { skills: { reading, writing, listening, speaking, grammar, vocabulary }, goals: [], activeView }
+  => Res: { skillsProfile: { skills, goals, activeView, updatedAt } }
+GET    /api/user/achievements       : Xem hệ thống danh hiệu/chứng nhận
+  => Req: {}
+  => Res: { achievements: [{ id, name, description, icon, unlocked, unlockedAt }] }
+POST   /api/user/avatar             : Upload ảnh đại diện
+  => Req: multipart/form-data { avatar: <File> }
+  => Res: { avatarUrl }
+POST   /api/user/change-password    : Đổi mật khẩu khi đã đăng nhập — EngSocial-FE có `/user/change-password`; kiểm tra đã expose trên BE
+  => Req: { currentPassword, newPassword } (theo triển khai)
+  => Res: {}
+GET    /api/user/goals              : Mục tiêu học tập — EngSocial-FE có `/user/goals`; kiểm tra đã expose trên BE
+  => Req: {}
+  => Res: {}
+POST   /api/user/block/:userId      : Chặn một người dùng
+  => Req: {}
+  => Res: {}
+DELETE /api/user/block/:userId      : Bỏ chặn một người dùng
+  => Req: {}
+  => Res: {}
+
+---------------------------------------------------------
+3. NOTIFICATIONS (Thông báo) - Base path: /api/notifications
+---------------------------------------------------------
+GET    /api/notifications               : Lấy danh sách thông báo
+  => Req: { page?, limit? } (Query)
+  => Res: { notifications: [{ _id, type, title, message, link, isRead, createdAt }] }
+GET    /api/notifications/unread-count  : Đếm số lượng thông báo chưa đọc
+  => Req: {}
+  => Res: { unreadCount: Number }
+PATCH  /api/notifications/:id/read      : Đánh dấu 1 thông báo là đã đọc
+  => Req: {}
+  => Res: {}
+PATCH  /api/notifications/read-all      : Đánh dấu tất cả là đã đọc
+  => Req: {}
+  => Res: {}
+DELETE /api/notifications/:id           : Xóa 1 thông báo
+  => Req: {}
+  => Res: {}
+
+---------------------------------------------------------
+4. GROUPS (Cộng đồng/Nhóm) - Base path: /api/groups
+---------------------------------------------------------
+GET    /api/groups                      : Lấy danh sách các nhóm
+  => Req: { search?, page?, limit? } (Query)
+  => Res: { groups: [{ _id, name, description, avatar, memberCount, privacy, host }] }
+GET    /api/groups/me                   : Nhóm tôi đang tham gia
+  => Req: {}
+  => Res: { groups: [...] }
+GET    /api/groups/:id/my-membership    : Trạng thái thành viên của tôi
+  => Req: {}
+  => Res: { membership: { status, role, joinedAt } }
+GET    /api/groups/:id                  : Lấy thông tin chi tiết nhóm
+  => Req: {}
+  => Res: { group: { _id, name, description, avatar, coverImage, privacy, host, memberCount, createdAt } }
+POST   /api/groups                      : Tạo nhóm mới
+  => Req: { name, description, privacy }
+  => Res: { group }
+PATCH  /api/groups/:id                  : Cập nhật nhóm
+  => Req: { name?, description?, privacy?, avatar?, coverImage? }
+  => Res: { group }
+POST   /api/groups/:id/join             : Xin vào nhóm
+  => Req: {}
+  => Res: { status }
+POST   /api/groups/:id/leave            : Rời nhóm
+  => Req: {}
+  => Res: {}
+GET    /api/groups/:id/join-requests    : Xem yêu cầu tham gia (Admin)
+  => Req: {}
+  => Res: { requests: [{ _id, user: { _id, name, avatar }, status, createdAt }] }
+POST   /api/groups/:id/join-requests/:userId/approve : Duyệt vào
+  => Req: {}
+  => Res: {}
+POST   /api/groups/:id/join-requests/:userId/reject  : Từ chối
+  => Req: {}
+  => Res: {}
+POST   /api/groups/:id/invite/accept    : Chấp nhận lời mời vào nhóm
+  => Req: {}
+  => Res: {}
+POST   /api/groups/:id/invite/decline   : Từ chối lời mời vào nhóm
+  => Req: {}
+  => Res: {}
+GET    /api/groups/:id/members          : Danh sách thành viên nhóm
+  => Req: {}
+  => Res: { members: [{ user: { _id, name, avatar }, role, joinedAt }] }
+POST   /api/groups/:id/members          : Thêm thành viên
+  => Req: { userIds: [String] }
+  => Res: {}
+DELETE /api/groups/:id/members/:userId  : Xóa thành viên khỏi nhóm
+  => Req: {}
+  => Res: {}
+
+---------------------------------------------------------
+5. FRIENDS (Kết bạn) - Base path: /api/friends
+---------------------------------------------------------
+GET    /api/friends                     : Danh sách bạn bè
+  => Req: {} (Query tuỳ FE: page, limit, …)
+  => Res: { friends: [{ _id, name, avatar, status, level }] }
+GET    /api/friends/search              : Tìm kiếm bạn
+  => Req: { q, page?, limit?, friendFilter? } (Query — EngSocial-FE dùng `q`, không phải `query`)
+  => Res: { users: [{ _id, name, avatar, level }] }
+GET    /api/friends/suggestions         : Gợi ý kết bạn — EngSocial-FE gọi `/friends/suggestions`; kiểm tra route đã có trên BE
+  => Req: {} (Query tuỳ FE)
+  => Res: { suggestions: [...] }
+GET    /api/friends/requests/pending    : Lời mời kết bạn đang chờ duyệt
+  => Req: {}
+  => Res: { requests: [{ _id, sender: { _id, name, avatar }, createdAt }] }
+GET    /api/friends/requests/sent       : Lời mời kết bạn đã gửi đi
+  => Req: {}
+  => Res: { requests: [{ _id, receiver: { _id, name, avatar }, createdAt }] }
+POST   /api/friends/request/:userId     : Gửi lời mời kết bạn tới userId
+  => Req: {}
+  => Res: {}
+PATCH  /api/friends/request/:id/accept  : Chấp nhận lời mời (:id = id quan hệ / friendship)
+  => Req: {}
+  => Res: {}
+DELETE /api/friends/request/:id         : Từ chối hoặc huỷ lời mời đã gửi
+  => Req: {}
+  => Res: {}
+DELETE /api/friends/:userId             : Xóa bạn (huỷ kết bạn)
+  => Req: {}
+  => Res: {}
+  => EngSocial-FE còn định nghĩa `POST /friends/:userId/add`, `POST /friends/:userId/accept`, `POST /friends/:userId/reject` — **không** thấy tương ứng trong `friend.routes.js`; luồng chuẩn BE là `request` + `PATCH .../accept` / `DELETE .../request/:id`
+
+---------------------------------------------------------
+6. UPLOAD MEDIA (Tải file) - Base path: /api/upload
+---------------------------------------------------------
+POST   /api/upload/asset                : Upload hình ảnh/âm thanh học liệu 
+  => Req: multipart/form-data { file: <File> }
+  => Res: { url: String }
+POST   /api/upload/post-media           : Upload media cho bài post
+  => Req: multipart/form-data { files: [<File>] }
+  => Res: { urls: [String] }
+
+---------------------------------------------------------
+7. CHATBOT / AI MESSAGE - Base path: /api/chatbot
+---------------------------------------------------------
+GET    /api/chatbot/conversations                    : Lịch sử hội thoại chatbot (auth)
+  => Req: {}
+  => Res: { conversations: [{ _id, topic, lastMessage, updatedAt }] }
+GET    /api/chatbot/conversations/:conversationId/messages : Lấy tin nhắn trong một hội thoại (auth)
+  => Req: {}
+  => Res: { messages: [{ _id, role(user/ai), content, createdAt }] }
+POST   /api/chatbot/chat                             : Gửi tin nhắn cho bot (auth) — backend dùng path cố định `/chat`, không phải `.../messages`
+  => Req: { conversationId?, message: String } (theo sendChatMessageSchema)
+  => Res: { reply: String, conversationId }
+  => Ghi chú EngSocial-FE: constants có thể trỏ POST `.../conversations/:id/messages`; cần gọi đúng `/api/chatbot/chat` hoặc thêm route alias trên BE
+DELETE /api/chatbot/conversations/:conversationId    : Xóa lịch sử một hội thoại (auth)
+  => Req: {}
+  => Res: {}
+
+---------------------------------------------------------
+8. ADMIN (Quản trị hệ thống) - Base path: /api/admin (Chưa Làm)  
+---------------------------------------------------------
+GET    /api/admin/users                 : Lấy danh sách toàn bộ users
+  => Req: { page?, limit?, search?, role?, status? } (Query)
+  => Res: { users: [{ _id, name, email, role, status, level, createdAt }], totalCount }
+PATCH  /api/admin/users/:id/role        : Chuyển role (Admin/Người dùng)
+  => Req: { role: 'admin' | 'user' | 'moderator' }
+  => Res: {}
+PATCH  /api/admin/users/:id/status      : Khóa/Mở khóa User
+  => Req: { status: 'active' | 'banned' }
+  => Res: {}
+GET    /api/admin/lessons               : Lấy danh sách tất cả Lessons
+  => Req: { page?, limit?, skill?, status? } (Query)
+  => Res: { lessons: [{ _id, title, skill, type, status, author }], totalCount }
+PATCH  /api/admin/lessons/:id/status    : Duyệt bài học
+  => Req: { status: 'published' | 'draft' | 'archived' }
+  => Res: {}
+GET    /api/admin/flagged-posts         : Xem bài viết bị report
+  => Req: { page?, limit? } (Query)
+  => Res: { posts: [{ _id, author, content, reportCount, reports: [] }], totalCount }
+PATCH  /api/admin/posts/:id/moderate    : Kiểm duyệt bài viết
+  => Req: { action: 'approve' | 'delete' | 'warn' }
+  => Res: {}
+PATCH  /api/admin/comments/:id/moderate : Kiểm duyệt bình luận
+  => Req: { action: 'approve' | 'delete' | 'warn' }
+  => Res: {}
+GET    /api/admin/stats                 : Lấy thống kê tổng quan hệ thống
+  => Req: {}
+  => Res: { stats: { totalUsers, activeUsers, totalLessons, totalPosts, recentSignups } }
+
+
+---------------------------------------------------------
+9. LEARNING & LESSONS (Học tập & Bài học) 
+---------------------------------------------------------
+[Lộ trình học & Bài học] - Base path: /api/lessons
+GET    /api/lessons/dashboard               : Lấy tổng quan học tập
+  => Req: {}
+  => Res: { dashboard: { totalCompleted, currentStreak, skillsProgress, recommendedLessons } }
+GET    /api/lessons/my-progress             : Xem tiến độ của tôi
+  => Req: {}
+  => Res: { progress: [{ lessonId, status, score, completedAt }] }
+GET    /api/lessons/history                 : Xem lịch sử học
+  => Req: { page?, limit? } (Query)
+  => Res: { history: [{ lessonId, score, earnedXp, completedAt }], total }
+GET    /api/lessons/reading/:id/content     : Lấy nội dung Reading
+  => Req: {}
+  => Res: { content: { passage, vocabulary, questions } }
+GET    /api/lessons/listening/:id/content   : Lấy nội dung Listening
+  => Req: {}
+  => Res: { content: { audioUrl, transcript, questions } }
+GET    /api/lessons/writing/:id/content     : Lấy nội dung Writing
+  => Req: {}
+  => Res: { content: { prompt, guidelines } }
+GET    /api/lessons/:id/progress            : Lấy tiến độ theo ID
+  => Req: {}
+  => Res: { progress: { status, score, answers, notes } }
+POST   /api/lessons/:id/notes               : Thêm ghi chú bài học
+  => Req: { content: String }
+  => Res: { notes: [{ _id, content, createdAt }] }
+POST   /api/lessons/:id/submit              : Nộp bài trắc nghiệm
+  => Req: { answers: [{ questionId, answer }] }
+  => Res: { result: { score, correctCount, totalQuestions, earnedXp } }
+POST   /api/lessons/:id/submit-writing      : Nộp bài tự luận
+  => Req: { content: String, attachments? }
+  => Res: { submission: { id, status, content } }
+POST   /api/lessons/:id/complete            : Hoàn thành bài học
+  => Req: { timeSpentSeconds? }
+  => Res: { result: { earnedXp, levelUp: Boolean, nextLevelInfo } }
+GET    /api/lessons                         : Lấy danh sách lesson (lọc)
+  => Req: { skill?, level?, type?, page?, limit? } (Query)
+  => Res: { lessons: [{ _id, title, skill, level, type, coverImage, author }], total }
+GET    /api/lessons/:id                     : Lấy chi tiết bài học
+  => Req: {}
+  => Res: { lesson: { _id, title, description, skill, level, content, author, createdAt } }
+GET    /api/lessons/:id/reviews             : Xem comment, đánh giá
+  => Req: { page?, limit? } (Query)
+  => Res: { reviews: [{ _id, user, rating, comment, createdAt }], averageRating, totalReviews }
+POST   /api/lessons/:id/reviews             : Gửi đánh giá
+  => Req: { rating, comment }
+  => Res: { review: { _id, user, rating, comment } }
+
+[Quản trị Lesson] - Dành cho Giáo viên/Admin
+POST   /api/lessons                         : Tạo bài học mới
+  => Req: { title, description, skill, level, type, content }
+  => Res: { lesson }
+PUT    /api/lessons/:id                     : Cập nhật bài học
+  => Req: { title?, description?, content?, status? }
+  => Res: { lesson }
+DELETE /api/lessons/:id                     : Xóa bài học
+  => Req: {}
+  => Res: {}
+GET    /api/lessons/:id/all-results         : Xem kết quả của mọi người
+  => Req: { page?, limit? } (Query)
+  => Res: { results: [{ userId, score, submission, status }] }
+POST   /api/lessons/:id/ai-grade/:userId    : AI chấm điểm tự luận
+  => Req: {}
+  => Res: { feedback: { score, comments: [], suggestions: [] } }
+POST   /api/lessons/:id/grade/:userId       : Giáo viên chấm tự luận
+  => Req: { score, feedback }
+  => Res: { submission: { status, score, feedback } }
+
+[Khác] - Base path: /api/skills, /api/practices, /api/vocabulary, /api/mock-tests, /api/word-scramble
+GET    /api/skills                          : Danh sách skill (Ngữ pháp, từ vựng..)
+  => Req: {}
+  => Res: { skills: [{ key, name, description, icon }] }
+GET    /api/skills/:key                     : Chi tiết 1 skill theo key (EngSocial-FE còn dùng path kiểu /skills/reading, /skills/listening/... — tương ứng :key)
+  => Req: {}
+  => Res: { skill: { key, name, topics: [] } }
+POST   /api/skills                          : Tạo skill (mod/admin)
+  => Req: { ... }
+  => Res: { skill }
+GET    /api/practices                       : Danh sách practice
+  => Req: { type? } (Query)
+  => Res: { practices: [{ _id, title, type }] }
+GET    /api/practices/fallback              : Danh sách practice dự phòng (vd. ?skill=reading)
+  => Req: { skill? } (Query)
+  => Res: { practices: [...] }
+GET    /api/practices/games                 : Trò chơi ôn tập
+  => Req: {}
+  => Res: { games: [{ _id, name, type, description }] }
+
+[Vocabulary — Base path: /api/vocabulary] (EngSocial-FE: vocabulary.service)
+GET    /api/vocabulary/recent               : Lấy lịch sử từ / hoạt động từ vựng gần đây (auth)
+  => Req: {}
+  => Res: { items: [...] } (theo controller)
+POST   /api/vocabulary/recent               : Ghi nhận một mục từ vựng / hoạt động (auth)
+  => Req: { ... } (theo vocabRecent.validator)
+  => Res: {}
+
+[Mock tests — Base path: /api/mock-tests] (toàn bộ route auth — EngSocial-FE: mockTest.service)
+POST   /api/mock-tests/record               : Lưu kết quả / phiên thi
+  => Req: { ... }
+  => Res: {}
+GET    /api/mock-tests/my-history           : Lịch sử thi của user hiện tại
+  => Req: {}
+  => Res: { sessions: [...] }
+GET    /api/mock-tests/session/:id          : Chi tiết một phiên thi
+  => Req: {}
+  => Res: { session: {...} }
+GET    /api/mock-tests/user-results/:userId : Kết quả thi theo user (mod/admin)
+  => Req: {}
+  => Res: { ... }
+
+GET    /api/word-scramble/next              : Lấy từ / câu hỏi game xáo chữ tiếp theo (public)
+  => Req: { level? } (Query)
+  => Res: { word: { id, scrambled, hint } }
+GET    /api/word-scramble/words             : Danh sách từ trong kho (mod/admin)
+  => Req: {}
+  => Res: { words: [...] }
+POST   /api/word-scramble/words             : Thêm từ (mod/admin)
+  => Req: { word, hint, level, ... }
+  => Res: { word }
+POST   /api/word-scramble/words/import-tsv  : Import TSV (mod/admin)
+  => Req: multipart hoặc body theo validator
+  => Res: {}
+PATCH  /api/word-scramble/words/:id         : Sửa từ (mod/admin)
+  => Req: { ... }
+  => Res: { word }
+DELETE /api/word-scramble/words/:id          : Xóa một từ (mod/admin)
+  => Req: {}
+  => Res: {}
+DELETE /api/word-scramble/words/all         : Xóa toàn bộ từ trong kho (mod/admin)
+  => Req: {}
+  => Res: {}
+GET    /api/word-scramble/results/:roomCode : Kết quả phòng chơi multiplayer (auth)
+  => Req: {}
+  => Res: { ... }
+
+---------------------------------------------------------
+10. SOCIAL COMMUNITY & MESSAGES (Cộng đồng báo bài & Chat) 
+---------------------------------------------------------
+[Community] - Base path: /api/community
+GET    /api/community/posts                 : Xem Newfeed
+  => Req: { page?, limit? } (Query)
+  => Res: { posts: [{ _id, content, author, media, stats, createdAt }], totalCount }
+GET    /api/community/posts/:id             : Xem chi tiết bài Post
+  => Req: {}
+  => Res: { post: { _id, content, author, media, stats, comments, reactions, createdAt } }
+GET    /api/community/posts/:postId/documents/:index/download : Tải document đính kèm
+  => Req: {}
+  => Res: File data stream
+POST   /api/community/posts                 : Đăng bài mới
+  => Req: { content, media? }
+  => Res: { post }
+PATCH  /api/community/posts/:id             : Sửa bài viết
+  => Req: { content, media? }
+  => Res: { post }
+DELETE /api/community/posts/:id             : Xóa bài viết
+  => Req: {}
+  => Res: {}
+GET    /api/community/posts/:id/reactions   : Lấy danh sách thả cảm xúc bài viết
+  => Req: {}
+  => Res: { reactions: [{ user, type, createdAt }] }
+GET    /api/community/posts/:id/comment-users: Lấy danh sách user đã comment
+  => Req: {}
+  => Res: { users: [{ _id, name, avatar }] }
+GET    /api/community/posts/:id/share-users : Lấy danh sách user đã share
+  => Req: {}
+  => Res: { users: [{ _id, name, avatar }] }
+POST   /api/community/posts/:id/like        : Thích/Bỏ thích bài
+  => Req: {}
+  => Res: { liked: Boolean, totalLikes }
+POST   /api/community/posts/:id/reaction    : Thả cảm xúc tùy chỉnh vào bài viết
+  => Req: { type: 'love' | 'haha' | 'wow' | 'sad' | 'angry' }
+  => Res: { reaction: { type }, totalReactions }
+POST   /api/community/posts/:id/report      : Báo cáo bài viết
+  => Req: { reason }
+  => Res: {}
+GET    /api/community/posts/:postId/comments: Danh sách bình luận
+  => Req: { page?, limit? } (Query)
+  => Res: { comments: [{ _id, content, author, reactions, createdAt }], totalCount }
+POST   /api/community/posts/:postId/comments: Gửi bình luận
+  => Req: { content }
+  => Res: { comment }
+GET    /api/community/comments/:commentId/reactions : Lấy danh sách thả cảm xúc bình luận
+  => Req: {}
+  => Res: { reactions: [{ user, type }] }
+POST   /api/community/comments/:commentId/reaction : Thả cảm xúc vào bình luận
+  => Req: { type }
+  => Res: { reaction }
+PATCH  /api/community/comments/:id          : Sửa bình luận
+  => Req: { content }
+  => Res: { comment }
+DELETE /api/community/comments/:id          : Cảnh cáo/Xóa bình luận
+  => Req: {}
+  => Res: {}
+
+[Chat / Nhắn tin] - Base path: /api/conversations
+GET    /api/conversations                   : Danh sách cuộc trò chuyện của tôi
+  => Req: { page?, limit? } (Query)
+  => Res: { conversations: [{ _id, isGroup, name, avatar, lastMessage, unreadCount, updatedAt }] }
+POST   /api/conversations                   : Tạo cuộc trò chuyện / group chat
+  => Req: { userIds: [String], name?, isGroup? }
+  => Res: { conversation }
+GET    /api/conversations/unread-total      : Tính tổng số tin nhắn chưa đọc
+  => Req: {}
+  => Res: { totalUnread }
+GET    /api/conversations/for-forward       : Lấy danh sách chat để forward tin nhắn
+  => Req: {}
+  => Res: { conversations: [{ _id, name, avatar, isGroup }] }
+GET    /api/conversations/with              : Lấy cuộc trò chuyện với 1 user cụ thể (?with=userId)
+  => Req: { with: String } (Query)
+  => Res: { conversation }
+GET    /api/conversations/attachment-download : Lấy link tải file đính kèm
+  => Req: { fileUrl: String } (Query)
+  => Res: { downloadUrl: String }
+GET    /api/conversations/:id/messages      : Lịch sử tin nhắn
+  => Req: { page?, limit? } (Query)
+  => Res: { messages: [{ _id, sender, content, type, status, reactions, createdAt }], totalCount }
+POST   /api/conversations/:id/messages      : Gửi tin nhắn mới (hỗ trợ multipart)
+  => Req: multipart/form-data { text, attachments: <Files> }
+  => Res: { message }
+PATCH  /api/conversations/:id/messages/:msgId: Sửa tin
+  => Req: { text }
+  => Res: { message }
+DELETE /api/conversations/:id/messages/:msgId: Thu hồi tin
+  => Req: {}
+  => Res: {}
+PUT    /api/conversations/:id/messages/:msgId/reaction : Thả cảm xúc vào tin nhắn
+  => Req: { type }
+  => Res: { reaction }
+POST   /api/conversations/:id/messages/delete-all : Xóa lịch sử tin nhắn phía bản thân
+  => Req: {}
+  => Res: {}
+PATCH  /api/conversations/:id/read          : Đánh dấu đã đọc
+  => Req: {}
+  => Res: {}
+PATCH  /api/conversations/:id/settings      : Cài đặt cho chat 1-1 (ẩn notification...)
+  => Req: { muteNotifications: Boolean }
+  => Res: {}
+PATCH  /api/conversations/:id/group-settings: Cài đặt nhóm (tên, avatar...)
+  => Req: { name?, avatar? }
+  => Res: { conversation }
+POST   /api/conversations/:id/members       : Thêm thành viên vào group
+  => Req: { userIds: [String] }
+  => Res: { conversation }
+PATCH  /api/conversations/:id/members/:userId/role : Phân quyền admin/member trong group
+  => Req: { role: 'admin' | 'member' }
+  => Res: {}
+POST   /api/conversations/:id/disband       : Giải tán group
+  => Req: {}
+  => Res: {}
+POST   /api/conversations/:id/leave         : Rời group
+  => Req: {}
+  => Res: {}
+POST   /api/conversations/:id/block         : Chặn 1 user khỏi nhóm
+  => Req: {}
+  => Res: {}
+DELETE /api/conversations/:id/block/:userId : Bỏ chặn user trong nhóm
+  => Req: {}
+  => Res: {}
+
+---------------------------------------------------------
+11. GAMIFICATION (Nhiệm vụ, Thử thách, Leaderboard) 
+---------------------------------------------------------
+[Quests] - Base path: /api/quests
+GET    /api/quests/friends                  : Lấy trạng thái nhiệm vụ "Kết bạn"
+  => Req: {}
+  => Res: { quest: { status, progress, target } }
+GET    /api/quests/notifications            : Lấy trạng thái nhiệm vụ "Đọc thông báo"
+  => Req: {}
+  => Res: { quest: { status, progress, target } }
+GET    /api/quests/chatbot                  : Lấy trạng thái nhiệm vụ "Chat với AI"
+  => Req: {}
+  => Res: { quest: { status, progress, target } }
+GET    /api/quests                          : Danh sách tất cả nhiệm vụ
+  => Req: { type? } (Query)
+  => Res: { quests: [{ _id, title, type, target, rewardXp, status }] }
+GET    /api/quests/:id                      : Chi tiết nhiệm vụ (Admin)
+  => Req: {}
+  => Res: { quest }
+POST   /api/quests                          : Tạo mới nhiệm vụ (Admin)
+  => Req: { title, description, type, target, rewardXp }
+  => Res: { quest }
+PUT    /api/quests/:id                      : Cập nhật nhiệm vụ (Admin)
+  => Req: { title, description, rewardXp... }
+  => Res: { quest }
+DELETE /api/quests/:id                      : Xóa nhiệm vụ (Admin)
+  => Req: {}
+  => Res: {}
+
+[Challenges] - Base path: /api/challenges
+GET    /api/challenges                      : Danh sách thử thách
+  => Req: { status? } (Query)
+  => Res: { challenges: [{ _id, title, description, goal, rewardXp, startDate, endDate, participantsCount }] }
+GET    /api/challenges/me                   : Thử thách của tôi (auth)
+  => Req: {}
+  => Res: { myChallenges: [{ challenge: { _id, title }, progress, status }] }
+GET    /api/challenges/:id                  : Chi tiết một thử thách
+  => Req: {}
+  => Res: { challenge }
+POST   /api/challenges                      : Tạo thử thách (mod/admin, auth)
+  => Req: { ... }
+  => Res: { challenge }
+PUT    /api/challenges/:id                  : Cập nhật thử thách (mod/admin, auth)
+  => Req: { ... }
+  => Res: { challenge }
+DELETE /api/challenges/:id                  : Xóa thử thách (mod/admin, auth)
+  => Req: {}
+  => Res: {}
+POST   /api/challenges/:id/join             : Tham gia thử thách (auth)
+  => Req: {}
+  => Res: { status: 'joined', challengeId }
+PATCH  /api/challenges/:id/progress         : Cập nhật tiến độ (auth)
+  => Req: { increment: Number }
+  => Res: { progress, status }
+GET    /api/challenges/:id/leaderboard      : Bảng xếp hạng thử thách
+  => Req: {}
+  => Res: { leaderboard: [{ rank, user: { _id, name, avatar }, progress }] }
+  => Ghi chú EngSocial-FE: `CHALLENGES.LEAVE` = POST `/challenges/:id/leave` — hiện không thấy route tương ứng trên BE; cần bổ sung BE hoặc đổi FE
+
+[Games] - Base path: /api/games
+GET    /api/games                           : Danh sách các game (Quiz, Flashcard..)
+  => Req: {}
+  => Res: { games: [{ _id, name, description, minLevel }] }
+GET    /api/games/:id                       : Chi tiết một game
+  => Req: {}
+  => Res: { game }
+GET    /api/games/history                   : Lịch sử chơi game (auth)
+  => Req: { page?, limit? } (Query)
+  => Res: { history: [{ gameId, score, earnedXp, date }], total }
+POST   /api/games/:id/start                 : Bắt đầu ván mới (auth)
+  => Req: {}
+  => Res: { session: { sessionId, gameData, startedAt } }
+POST   /api/games/sessions/:sessionId/submit: Nộp điểm (auth) — đường dẫn chuẩn trên BE
+  => Req: { actions: [], score: Number }
+  => Res: { result: { earnedXp, validScore } }
+  => EngSocial-FE: `GAMES.SUBMIT(id)` trỏ tới `POST /games/:id/submit` — **không có** trên BE; sau `POST /games/:id/start` hãy dùng `sessionId` và gọi `POST /games/sessions/:sessionId/submit`
+POST   /api/games                           : Tạo game (auth)
+  => Req: { ... }
+  => Res: { game }
+POST   /api/games/matchmaking/test          : Kiểm thử matchmaking (auth)
+  => Req: { ... }
+  => Res: { ... }
+  => Ghi chú EngSocial-FE: `GAMES.LEADERBOARD` = GET `/games/:id/leaderboard` — kiểm tra BE đã expose hay chưa
+
+[Leaderboard] - Base path: /api/leaderboard
+GET    /api/leaderboard                     : Bảng xếp hạng (EngSocial-FE: ?type=weekly | monthly | all_time; tham số khác tuỳ BE)
+  => Req: { type?, limit?, page? } (Query)
+  => Res: { leaderboard: [{ rank, user: { _id, name, avatar, level }, totalXp }] }
+POST   /api/leaderboard/generate            : Tạo / làm mới BXH (Admin, auth)
+  => Req: {}
+  => Res: {}

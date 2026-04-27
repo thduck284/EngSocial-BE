@@ -1,6 +1,6 @@
 import mongoose from 'mongoose'
 import { verifyToken } from '../utils/jwt.js'
-import { Conversation } from '../models/index.js'
+import { Conversation, User } from '../models/index.js'
 import { registerWordScrambleLobbyHandlers, rooms } from '../sockets/wordScrambleLobby.js'
 import { registerWordScrambleGameHandlers } from '../sockets/wordScrambleGame.js'
 
@@ -39,22 +39,30 @@ export function isUserOnline(userId) {
   return !!(set && set.size > 0)
 }
 
+/**
+ * Gửi event tới mọi socket của user (room `user:${userId}`).
+ * Mỗi socket đã join room này trong registerWordScrambleLobbyHandlers.
+ * Dùng room thay vì io.to(socketId) — to(socketId) dễ không match tùy bản Socket.IO / adapter.
+ */
 export function emitToUser(io, userId, event, data) {
   if (!io) return
-  const id = userId?.toString?.() || userId
-  const socketIds = userSockets.get(id)
-  if (socketIds) {
-    socketIds.forEach((sid) => io.to(sid).emit(event, data))
-  }
+  const id = userId != null ? String(userId).trim() : ''
+  if (!id) return
+  io.to(`user:${id}`).emit(event, data)
 }
 
 export function setupSocket(io) {
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.query?.token
     if (!token) return next(new Error('auth_missing'))
     try {
       const decoded = verifyToken(token)
-      socket.userId = decoded.userId?.toString?.() || decoded.userId
+      const userId = decoded.userId?.toString?.() || decoded.userId
+      const u = await User.findById(userId).select('status').lean()
+      if (!u) return next(new Error('auth_invalid'))
+      if (u.status === 'banned') return next(new Error('account_banned'))
+      if (u.status === 'inactive') return next(new Error('account_inactive'))
+      socket.userId = userId
       next()
     } catch {
       next(new Error('auth_invalid'))

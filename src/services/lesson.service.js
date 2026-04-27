@@ -4,6 +4,8 @@ import { getPagination, getPaginationQuery } from '../utils/index.js'
 import { generateUniqueSlug } from '../utils/slug.js'
 import * as aiService from './ai.service.js'
 import * as mockTestService from './mockTest.service.js'
+import { bumpPeriodicQuestsOnLessonEvent } from './userPeriodicQuest.service.js'
+import { incrementChallengeProgressByRequirement } from './challenge.service.js'
 
 /**
  * Get all lessons with filters and pagination
@@ -140,6 +142,7 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent, isMo
   
   progress.isMockTest = !!isMockTest
 
+
   // Grade answers
   let score = 0
   const gradedAnswers = answers.map((a, idx) => {
@@ -223,6 +226,23 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent, isMo
       xpEarned: xpEarnedThisAttempt,
       timeSpent: timeSpent || 0,
     })
+
+    try {
+      await bumpPeriodicQuestsOnLessonEvent(
+        userId,
+        lesson.skill || 'reading',
+        progressPercent,
+        lesson.category || 'lesson'
+      )
+    } catch (e) {
+      console.warn('[periodicQuest] lesson submit bump:', e?.message)
+    }
+    try {
+      await incrementChallengeProgressByRequirement(userId, 'lessons', 1)
+      await incrementChallengeProgressByRequirement(userId, 'score', progressPercent)
+    } catch (e) {
+      console.warn('[challenge] lesson submit bump:', e?.message)
+    }
   }
 
   progress.attemptHistory = progress.attemptHistory || []
@@ -585,6 +605,7 @@ export const gradeUserWriting = async (lessonId, userId, { score, feedback }) =>
   const lesson = await Lesson.findById(lessonId)
   if (!lesson) throw new Error('LESSON_NOT_FOUND')
 
+
   // Update progress
   const progressPercent = Math.round((score / (lesson.maxScore || 100)) * 100)
   progress.status = 'completed'
@@ -637,6 +658,23 @@ export const gradeUserWriting = async (lessonId, userId, { score, feedback }) =>
 
   // Update Mock Test session status if this part is graded
   await mockTestService.updateSessionStatusIfCompleted(progress._id)
+
+  try {
+    await bumpPeriodicQuestsOnLessonEvent(
+      userId,
+      lesson.skill || 'writing',
+      progressPercent,
+      lesson.category || 'lesson'
+    )
+  } catch (e) {
+    console.warn('[periodicQuest] writing grade bump:', e?.message)
+  }
+  try {
+    await incrementChallengeProgressByRequirement(userId, 'lessons', 1)
+    await incrementChallengeProgressByRequirement(userId, 'score', progressPercent)
+  } catch (e) {
+    console.warn('[challenge] writing grade bump:', e?.message)
+  }
 
   return progress
 }

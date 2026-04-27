@@ -1,5 +1,17 @@
 import mongoose from 'mongoose'
 
+/** Giá trị `condition.filters.category` — giữ đồng bộ với quest.controller normalizeCondition */
+export const QUEST_FILTER_CATEGORIES = [
+  'all',
+  'lesson',
+  'practice',
+  'friends',
+  'vocabulary_notes',
+  'community_post',
+  'login_streak',
+  'online_time',
+]
+
 /**
  * Quest - Nhiệm vụ hàng ngày/tuần cho người học
  */
@@ -12,11 +24,18 @@ const questSchema = new mongoose.Schema({
     default: 'daily',
   },
   condition: {
+    /** Giữ field legacy; đồng bộ với targetMin khi lưu qua controller */
     target: { type: Number, required: true, min: 1, default: 1 },
+    targetMin: { type: Number, min: 1, default: 1 },
+    targetMax: { type: Number, min: 1, default: 1 },
     filters: {
       skill: { type: String, enum: ['reading', 'listening', 'writing', 'all'], default: 'all' },
-      category: { type: String, enum: ['lesson', 'practice', 'all'], default: 'all' },
-      minProgress: { type: Number, min: 0, max: 100, default: 100 },
+      category: {
+        type: String,
+        enum: QUEST_FILTER_CATEGORIES,
+        default: 'all',
+      },
+      /** Ngưỡng % điểm (score/max*100) — trùng ý nghĩa với progress bài học trong hệ thống; không dùng field minProgress riêng. */
       minScorePercent: { type: Number, min: 0, max: 100, default: 0 },
     },
   },

@@ -1,9 +1,13 @@
 import mongoose from 'mongoose'
 
 const challengeSchema = new mongoose.Schema({
-  // title & description now store Vietnamese text directly
+  // Keep legacy title/description and add explicit locale fields.
   title: { type: String, required: true },
+  titleVi: String,
+  titleEn: String,
   description: String,
+  descriptionVi: String,
+  descriptionEn: String,
   type: {
     type: String,
     enum: ['daily', 'weekly', 'monthly', 'special'],
@@ -16,6 +20,7 @@ const challengeSchema = new mongoose.Schema({
   requirement: {
     type: {
       type: String,
+      /** `lessons`: mục tiêu đếm gồm cả hoàn thành lesson và practice (một bộ đếm; BE cộng dồn khi có hook). */
       enum: ['lessons', 'time', 'score', 'streak'],
     },
     target: Number,

@@ -1,0 +1,389 @@
+{
+  "meta": {
+    "version": "1.0",
+    "shortGuideFile": "achievement-categories-6-fixed.json",
+    "purpose": "Bản chi tiết + ví dụ achievement. Bản đọc nhanh 6 category: xem shortGuideFile.",
+    "relatedCode": {
+      "questFilterCategories": [
+        "all",
+        "lesson",
+        "practice",
+        "friends",
+        "vocabulary_notes",
+        "community_post",
+        "login_streak",
+        "online_time"
+      ],
+      "challengeRequirementTypes": ["lessons", "score", "time", "streak"],
+      "achievementModelTypes": ["streak", "skill", "social", "challenge", "special"]
+    }
+  },
+  "categories": [
+    {
+      "id": "learning",
+      "title": { "vi": "Học tập", "en": "Learning" },
+      "description": {
+        "vi": "Chuỗi đăng nhập, thời gian online, tổng bài học/luyện (không tách skill), XP/level.",
+        "en": "Login streak, online time, total lessons/practice (all skills), XP/level milestones."
+      },
+      "mapsTo": {
+        "questFilters": ["login_streak", "online_time", "lesson", "practice"],
+        "challengeTypes": ["streak", "time", "lessons"],
+        "notes": {
+          "vi": "Khi quest dùng skill=all hoặc đếm tổng quát; challenge lessons/score có thể gộp vào learning nếu không tách theo skill.",
+          "en": "Quests with skill=all or aggregate counts; challenge lessons/time/streak often fit here unless split by skill."
+        }
+      },
+      "suggestedAchievements": [
+        {
+          "key": "login_streak",
+          "suggestedBeType": "streak",
+          "vi": "Đăng nhập mỗi ngày để duy trì chuỗi; hoàn thành các mốc ngày liên tiếp.",
+          "en": "Log in daily to keep your streak; complete each consecutive-day milestone.",
+          "requirement": {
+            "type": "login_streak_days",
+            "value": 30,
+            "milestones": [
+              {
+                "value": 7,
+                "vi": "Đăng nhập 7 ngày liên tiếp",
+                "en": "7 consecutive login days",
+                "xpReward": 80,
+                "rewardType": "both",
+                "badgeName": "Chuỗi 7 ngày",
+                "badgeNameEn": "7-day streak",
+                "badgeIcon": "local_fire_department"
+              },
+              {
+                "value": 30,
+                "vi": "Đăng nhập 30 ngày liên tiếp",
+                "en": "30 consecutive login days",
+                "xpReward": 220,
+                "rewardType": "both",
+                "badgeName": "Chuỗi 30 ngày",
+                "badgeNameEn": "30-day streak",
+                "badgeIcon": "whatshot"
+              }
+            ]
+          }
+        },
+        {
+          "key": "online_time_minutes_60",
+          "suggestedBeType": "special",
+          "vi": "Tích lũy thời gian online (theo tick hệ thống); hoàn thành từng mốc phút.",
+          "en": "Accumulate online time (system ticks); complete each minute milestone.",
+          "requirement": {
+            "type": "online_minutes",
+            "value": 60,
+            "milestones": [
+              {
+                "value": 30,
+                "vi": "Tích lũy 30 phút online",
+                "en": "Accumulate 30 minutes online",
+                "xpReward": 25,
+                "rewardType": "exp"
+              },
+              {
+                "value": 60,
+                "vi": "Tích lũy 60 phút online",
+                "en": "Accumulate 60 minutes online",
+                "xpReward": 35,
+                "rewardType": "exp"
+              }
+            ]
+          }
+        },
+        {
+          "key": "lessons_completed_any_skill_10",
+          "suggestedBeType": "special",
+          "vi": "Hoàn thành bài học (mọi kỹ năng); hoàn thành từng mốc số bài.",
+          "en": "Complete lessons (all skills); complete each lesson-count milestone.",
+          "requirement": {
+            "type": "lessons_completed",
+            "value": 10,
+            "milestones": [
+              {
+                "value": 5,
+                "vi": "Hoàn thành 5 bài học (mọi kỹ năng)",
+                "en": "Complete 5 lessons (all skills)",
+                "xpReward": 40,
+                "rewardType": "both",
+                "badgeName": "Học viên 5 bài",
+                "badgeNameEn": "5-lesson learner",
+                "badgeIcon": "school"
+              },
+              {
+                "value": 10,
+                "vi": "Hoàn thành 10 bài học (mọi kỹ năng)",
+                "en": "Complete 10 lessons (all skills)",
+                "xpReward": 60,
+                "rewardType": "both",
+                "badgeName": "Học viên chăm chỉ",
+                "badgeNameEn": "Dedicated learner",
+                "badgeIcon": "workspace_premium"
+              }
+            ]
+          }
+        },
+        {
+          "key": "xp_total_1000",
+          "suggestedBeType": "special",
+          "vi": "Đạt tổng XP trên hồ sơ; hoàn thành từng mốc XP.",
+          "en": "Reach total XP on your profile; complete each XP milestone.",
+          "requirement": {
+            "type": "xp_total",
+            "value": 1000,
+            "milestones": [
+              {
+                "value": 500,
+                "vi": "Đạt tổng 500 XP",
+                "en": "Reach 500 total XP",
+                "xpReward": 40,
+                "rewardType": "exp"
+              },
+              {
+                "value": 1000,
+                "vi": "Đạt tổng 1000 XP",
+                "en": "Reach 1,000 total XP",
+                "xpReward": 60,
+                "rewardType": "exp"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "skills",
+      "title": { "vi": "Kỹ năng", "en": "Skills" },
+      "description": {
+        "vi": "Reading / Listening / Writing: số bài, điểm, ngưỡng % bài làm.",
+        "en": "Reading, listening, writing: lesson counts, scores, min score percent."
+      },
+      "mapsTo": {
+        "questFilters": ["lesson", "practice"],
+        "challengeTypes": ["lessons", "score"],
+        "notes": {
+          "vi": "Lọc theo filters.skill = reading | listening | writing; minScorePercent trên Quest.",
+          "en": "Use Quest filters.skill and minScorePercent; challenges with skill + score/lessons."
+        }
+      },
+      "suggestedAchievements": [
+        {
+          "key": "reading_lessons_5",
+          "suggestedBeType": "skill",
+          "skill": "reading",
+          "requirement": { "type": "lessons_completed", "value": 5 },
+          "vi": "Hoàn thành 5 bài Reading",
+          "en": "Complete 5 Reading lessons"
+        },
+        {
+          "key": "listening_lessons_5",
+          "suggestedBeType": "skill",
+          "skill": "listening",
+          "requirement": { "type": "lessons_completed", "value": 5 },
+          "vi": "Hoàn thành 5 bài Listening",
+          "en": "Complete 5 Listening lessons"
+        },
+        {
+          "key": "writing_lessons_5",
+          "suggestedBeType": "skill",
+          "skill": "writing",
+          "requirement": { "type": "lessons_completed", "value": 5 },
+          "vi": "Hoàn thành 5 bài Writing",
+          "en": "Complete 5 Writing lessons"
+        },
+        {
+          "key": "reading_score_sum_200",
+          "suggestedBeType": "skill",
+          "skill": "reading",
+          "requirement": { "type": "score_sum", "value": 200 },
+          "vi": "Tích lũy 200 điểm bài Reading (theo challenge score)",
+          "en": "Accumulate 200 reading submission score points"
+        },
+        {
+          "key": "lesson_min_score_90_once",
+          "suggestedBeType": "skill",
+          "skill": "all",
+          "requirement": { "type": "min_score_percent_once", "value": 90 },
+          "vi": "Một lần đạt ≥90% điểm bài (bất kỳ skill)",
+          "en": "Once reach ≥90% on a lesson (any skill)"
+        }
+      ]
+    },
+    {
+      "id": "vocab",
+      "title": { "vi": "Từ vựng & Ôn tập", "en": "Vocabulary & review" },
+      "description": {
+        "vi": "Ghi chú từ, ôn tập từ vựng (quest vocabulary_notes).",
+        "en": "Vocabulary notes and review (quest category vocabulary_notes)."
+      },
+      "mapsTo": {
+        "questFilters": ["vocabulary_notes"],
+        "challengeTypes": [],
+        "notes": {
+          "vi": "Flashcard riêng nếu sau này có hook — gom vào vocab.",
+          "en": "Flashcards or other vocab hooks map here when available."
+        }
+      },
+      "suggestedAchievements": [
+        {
+          "key": "vocab_notes_saved_25",
+          "suggestedBeType": "special",
+          "requirement": { "type": "vocabulary_notes_count", "value": 25 },
+          "vi": "Lưu 25 ghi chú / mục từ vựng",
+          "en": "Save 25 vocabulary notes"
+        },
+        {
+          "key": "vocab_notes_saved_100",
+          "suggestedBeType": "special",
+          "requirement": { "type": "vocabulary_notes_count", "value": 100 },
+          "vi": "Lưu 100 ghi chú từ vựng",
+          "en": "Save 100 vocabulary notes"
+        },
+        {
+          "key": "vocab_quest_periods_completed_4",
+          "suggestedBeType": "special",
+          "requirement": { "type": "vocab_periodic_quests_done", "value": 4 },
+          "vi": "Hoàn thành quest periodic loại vocab trong 4 kỳ (daily/weekly tùy pool)",
+          "en": "Complete vocab-tagged periodic quests across 4 periods"
+        }
+      ]
+    },
+    {
+      "id": "quests",
+      "title": { "vi": "Nhiệm vụ & Thử thách", "en": "Quests & challenges" },
+      "description": {
+        "vi": "Hoàn thành quest cố định / periodic; tham gia hoàn thành challenge (meta).",
+        "en": "Daily/weekly/one-time quests, periodic slots; meta progress on challenges."
+      },
+      "mapsTo": {
+        "questFilters": ["all"],
+        "challengeTypes": ["lessons", "score", "time", "streak"],
+        "notes": {
+          "vi": "Đếm UserQuestProgress / UserPeriodicQuest completed; challenge participant completed.",
+          "en": "Count completed UserQuestProgress, UserPeriodicQuest; challenge completion if tracked."
+        }
+      },
+      "suggestedAchievements": [
+        {
+          "key": "daily_quests_completed_7",
+          "suggestedBeType": "challenge",
+          "requirement": { "type": "daily_quests_completed", "value": 7 },
+          "vi": "Hoàn thành 7 daily quest (không nhất thiết liên tiếp)",
+          "en": "Complete 7 daily quests"
+        },
+        {
+          "key": "weekly_quests_completed_4",
+          "suggestedBeType": "challenge",
+          "requirement": { "type": "weekly_quests_completed", "value": 4 },
+          "vi": "Hoàn thành 4 weekly quest",
+          "en": "Complete 4 weekly quests"
+        },
+        {
+          "key": "periodic_quest_slots_completed_20",
+          "suggestedBeType": "challenge",
+          "requirement": { "type": "periodic_slots_completed", "value": 20 },
+          "vi": "Hoàn thành 20 slot periodic quest",
+          "en": "Complete 20 periodic quest slots"
+        },
+        {
+          "key": "challenge_completed_1",
+          "suggestedBeType": "challenge",
+          "requirement": { "type": "challenges_completed", "value": 1 },
+          "vi": "Hoàn thành 1 challenge (khi BE có cờ complete)",
+          "en": "Complete 1 challenge (when BE tracks completion)"
+        }
+      ]
+    },
+    {
+      "id": "community",
+      "title": { "vi": "Cộng đồng", "en": "Community" },
+      "description": {
+        "vi": "Bài viết, bình luận, tương tác feed (quest community_post).",
+        "en": "Posts, comments, feed engagement (quest community_post)."
+      },
+      "mapsTo": {
+        "questFilters": ["community_post"],
+        "challengeTypes": [],
+        "notes": {
+          "vi": "Like/comment chi tiết cần hook riêng nếu chưa gắn quest.",
+          "en": "Likes/comments may need extra hooks beyond community_post count."
+        }
+      },
+      "suggestedAchievements": [
+        {
+          "key": "community_posts_1",
+          "suggestedBeType": "social",
+          "requirement": { "type": "community_posts", "value": 1 },
+          "vi": "Đăng 1 bài lên cộng đồng",
+          "en": "Publish 1 community post"
+        },
+        {
+          "key": "community_posts_10",
+          "suggestedBeType": "social",
+          "requirement": { "type": "community_posts", "value": 10 },
+          "vi": "Đăng 10 bài cộng đồng",
+          "en": "Publish 10 community posts"
+        },
+        {
+          "key": "comments_written_20",
+          "suggestedBeType": "social",
+          "requirement": { "type": "comments_count", "value": 20 },
+          "vi": "Viết 20 bình luận (cần đếm từ service comment)",
+          "en": "Write 20 comments (requires comment service counter)"
+        }
+      ]
+    },
+    {
+      "id": "social",
+      "title": { "vi": "Bạn bè & Chat", "en": "Friends & chat" },
+      "description": {
+        "vi": "Kết bạn, tin nhắn, nhóm (quest friends + friendship/group hooks).",
+        "en": "Friends, messages, groups (quest friends + friendship/group hooks)."
+      },
+      "mapsTo": {
+        "questFilters": ["friends"],
+        "challengeTypes": [],
+        "notes": {
+          "vi": "Key achievement nên chứa friend/chat/group để FE heuristic map đúng category.",
+          "en": "Use achievement keys containing friend/chat/group for reliable FE category mapping until categoryId exists on BE."
+        }
+      },
+      "suggestedAchievements": [
+        {
+          "key": "friends_added_1",
+          "suggestedBeType": "social",
+          "requirement": { "type": "friends_count", "value": 1 },
+          "vi": "Có 1 bạn bè (kết bạn thành công)",
+          "en": "Have 1 friend (accepted friendship)"
+        },
+        {
+          "key": "friends_added_10",
+          "suggestedBeType": "social",
+          "requirement": { "type": "friends_count", "value": 10 },
+          "vi": "Có 10 bạn bè",
+          "en": "Have 10 friends"
+        },
+        {
+          "key": "messages_sent_50",
+          "suggestedBeType": "social",
+          "requirement": { "type": "messages_sent", "value": 50 },
+          "vi": "Gửi 50 tin nhắn (nếu có metric)",
+          "en": "Send 50 messages (if metric exists)"
+        },
+        {
+          "key": "groups_joined_3",
+          "suggestedBeType": "social",
+          "requirement": { "type": "groups_joined", "value": 3 },
+          "vi": "Tham gia 3 nhóm chat",
+          "en": "Join 3 chat groups"
+        }
+      ]
+    }
+  ],
+  "implementationHint": {
+    "vi": "Trên Mongo, document Achievement hiện có type/skill/requirement — có thể thêm field categoryId (learning|skills|vocab|quests|community|social) để FE không cần đoán từ key. requirement.type trong JSON này là gợi ý logic đếm, có thể khác tên field thực tế khi implement.",
+    "en": "Mongo Achievement documents use type/skill/requirement; add optional categoryId for stable FE grouping. requirement.type values here are logical counters — align names when implementing services."
+  }
+}

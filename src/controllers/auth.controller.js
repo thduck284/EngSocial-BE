@@ -54,6 +54,12 @@ export const login = async (req, res, next) => {
         messageKey: 'auth.accountBanned',
       }, req)
     }
+    if (error.message === 'ACCOUNT_INACTIVE') {
+      return sendError(res, {
+        statusCode: 403,
+        messageKey: 'auth.accountInactive',
+      }, req)
+    }
     next(error)
   }
 }
@@ -75,6 +81,12 @@ export const loginWithGoogle = async (req, res, next) => {
       return sendError(res, {
         statusCode: 403,
         messageKey: 'auth.accountBanned',
+      }, req)
+    }
+    if (error.message === 'ACCOUNT_INACTIVE') {
+      return sendError(res, {
+        statusCode: 403,
+        messageKey: 'auth.accountInactive',
       }, req)
     }
     if (error.message === 'SOCIAL_TOKEN_INVALID') {
@@ -113,6 +125,12 @@ export const loginWithFacebook = async (req, res, next) => {
         messageKey: 'auth.accountBanned',
       }, req)
     }
+    if (error.message === 'ACCOUNT_INACTIVE') {
+      return sendError(res, {
+        statusCode: 403,
+        messageKey: 'auth.accountInactive',
+      }, req)
+    }
     if (error.message === 'SOCIAL_TOKEN_INVALID') {
       return sendError(res, {
         statusCode: 401,
@@ -149,6 +167,18 @@ export const refresh = async (req, res, next) => {
       return sendError(res, {
         statusCode: 401,
         messageKey: 'auth.refreshTokenInvalid',
+      }, req)
+    }
+    if (error.message === 'ACCOUNT_BANNED') {
+      return sendError(res, {
+        statusCode: 403,
+        messageKey: 'auth.accountBanned',
+      }, req)
+    }
+    if (error.message === 'ACCOUNT_INACTIVE') {
+      return sendError(res, {
+        statusCode: 403,
+        messageKey: 'auth.accountInactive',
       }, req)
     }
     next(error)

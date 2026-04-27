@@ -1,6 +1,8 @@
 import mongoose from 'mongoose'
 import { isUserOnline } from '../config/socket.js'
 import { Conversation, MessageBucket, ConversationSetting, Message, User } from '../models/index.js'
+import { bumpPeriodicQuestsOnOnlineTimeEvent } from './userPeriodicQuest.service.js'
+import { incrementChallengeProgressByRequirement } from './challenge.service.js'
 
 /**
  * Get or create a direct conversation between current user and other user.
@@ -608,13 +610,34 @@ export const reactToMessage = async (conversationId, messageId, userId, emoji) =
 }
 
 const FAR_FUTURE_MS = 10 * 365 * 24 * 60 * 60 * 1000 // ~10 years
+const ONLINE_TIME_BUMP_INTERVAL_MS = 60 * 1000 // 1 minute
+const lastOnlineQuestBumpByUser = new Map()
 
 /** Cập nhật lastAccessedAt và lastActiveDate cho user (gọi khi có request conversation). lastActiveDate dùng để hiển thị "Hoạt động x phút trước". */
 export const updateUserLastAccessed = async (userId) => {
   const userIdObj = mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : null
   if (!userIdObj) return
   const now = new Date()
-  await User.updateOne({ _id: userIdObj }, { $set: { lastAccessedAt: now, lastActiveDate: now } })
+  const uid = userIdObj.toString()
+  const nowMs = now.getTime()
+  const lastMs = lastOnlineQuestBumpByUser.get(uid) || 0
+  const shouldBump = nowMs - lastMs >= ONLINE_TIME_BUMP_INTERVAL_MS
+  const update = { $set: { lastAccessedAt: now, lastActiveDate: now } }
+  if (shouldBump) {
+    lastOnlineQuestBumpByUser.set(uid, nowMs)
+    update.$inc = { 'achievementStats.onlineMinutes': 1 }
+    try {
+      await bumpPeriodicQuestsOnOnlineTimeEvent(uid, 1)
+    } catch (e) {
+      console.warn('[periodicQuest] online time bump:', e?.message)
+    }
+    try {
+      await incrementChallengeProgressByRequirement(uid, 'time', 1)
+    } catch (e) {
+      console.warn('[challenge] online time bump:', e?.message)
+    }
+  }
+  await User.updateOne({ _id: userIdObj }, update)
 }
 
 /**

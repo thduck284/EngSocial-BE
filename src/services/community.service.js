@@ -3,6 +3,7 @@ import { Post, Reaction, Comment, User, Friendship } from '../models/index.js'
 import { PostDTO, PostDetailDTO, CommentDTO, CommentDetailDTO } from '../dto/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
 import * as notificationService from './notification.service.js'
+import { incrementPeriodicQuestsForCategory } from './userPeriodicQuest.service.js'
 import { emitToUser } from '../config/socket.js'
 
 /** Extract unique hashtag strings from content (without #) */
@@ -409,6 +410,13 @@ export const createPost = async (userId, data, io = null) => {
     challengeId: data.challengeId,
     sharedPostId: data.sharedPostId || null,
   })
+
+  try {
+    await incrementPeriodicQuestsForCategory(userId, 'community_post', 1)
+    await incrementPeriodicQuestsForCategory(userId, 'all', 1)
+  } catch (e) {
+    console.warn('[periodicQuest] community_post bump:', e?.message)
+  }
 
   if (data.sharedPostId) {
     const sid = String(data.sharedPostId).trim()

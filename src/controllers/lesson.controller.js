@@ -521,7 +521,7 @@ export const completeLesson = async (req, res, next) => {
   try {
     const { id } = req.params
     const filter = mongoose.isValidObjectId(id) ? { _id: id } : { slug: id }
-    const lesson = await Lesson.findOne(filter).select('_id xpReward').lean()
+    const lesson = await Lesson.findOne(filter).select('_id xpReward skill category').lean()
     if (!lesson) {
       return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
     }

@@ -4,6 +4,9 @@ import { hashPassword, comparePassword, generateTokenPair } from '../utils/index
 import { UserDTO, AuthResponseDTO, RefreshTokenResponseDTO } from '../dto/index.js'
 import { indexUser } from '../config/elasticsearch/userSearch.service.js'
 import { OAuth2Client } from 'google-auth-library'
+import { bumpPeriodicQuestsOnLoginStreakEvent } from './userPeriodicQuest.service.js'
+import { incrementChallengeProgressByRequirement } from './challenge.service.js'
+import { updateUserStreakOnLogin } from '../utils/loginStreak.js'
 
 /**
  * Register new user
@@ -84,9 +87,11 @@ export const login = async ({ email, password }) => {
     throw new Error('INVALID_CREDENTIALS')
   }
 
-  // Check if account is banned
   if (user.status === 'banned') {
     throw new Error('ACCOUNT_BANNED')
+  }
+  if (user.status === 'inactive') {
+    throw new Error('ACCOUNT_INACTIVE')
   }
 
   // Check password
@@ -99,9 +104,22 @@ export const login = async ({ email, password }) => {
   const { accessToken, refreshToken } = generateTokenPair(user._id.toString())
   await issueRefreshToken(user._id, refreshToken)
 
-  // Update last active date
-  user.lastActiveDate = new Date()
+  const now = new Date()
+  const { calendarAdvance } = updateUserStreakOnLogin(user, now)
   await user.save()
+
+  if (calendarAdvance) {
+    try {
+      await bumpPeriodicQuestsOnLoginStreakEvent(user._id)
+    } catch (e) {
+      console.warn('[periodicQuest] login streak bump:', e?.message)
+    }
+    try {
+      await incrementChallengeProgressByRequirement(user._id, 'streak', 1)
+    } catch (e) {
+      console.warn('[challenge] login streak bump:', e?.message)
+    }
+  }
 
   // Return user data (without password) using DTO
   return new AuthResponseDTO({
@@ -136,7 +154,10 @@ export const loginWithGoogle = async ({ idToken }) => {
     })
 
     if (user?.status === 'banned') throw new Error('ACCOUNT_BANNED')
+    if (user?.status === 'inactive') throw new Error('ACCOUNT_INACTIVE')
 
+    const now = new Date()
+    let calendarAdvance = false
     if (!user) {
       const randomPassword = crypto.randomBytes(32).toString('hex') + 'Aa1'
       const hashedPassword = await hashPassword(randomPassword)
@@ -153,37 +174,45 @@ export const loginWithGoogle = async ({ idToken }) => {
       try {
         await indexUser({ id: user._id.toString(), name: user.name, email: user.email, updatedAt: user.updatedAt })
       } catch (_) {}
+      calendarAdvance = updateUserStreakOnLogin(user, now).calendarAdvance
+      await user.save()
     } else {
       // Link provider info if missing
-      let changed = false
       if (!user.provider || user.provider === 'local') {
         // keep local as-is; don't overwrite
       } else if (user.provider === 'google' && !user.providerId) {
         user.providerId = providerId
-        changed = true
       }
       if (!user.emailVerified) {
         user.emailVerified = true
-        changed = true
       }
       if (picture && !user.avatar) {
         user.avatar = picture
         user.markModified('avatar')
-        changed = true
       }
-      if (user.status === 'pending' || user.status === 'inactive') {
+      if (user.status === 'pending') {
         user.status = 'active'
-        changed = true
       }
-      user.lastActiveDate = new Date()
-      if (changed) await user.save()
-      else await user.updateOne({ $set: { lastActiveDate: user.lastActiveDate } })
+      calendarAdvance = updateUserStreakOnLogin(user, now).calendarAdvance
+      await user.save()
       user = await User.findById(user._id)
     }
 
+    if (calendarAdvance) {
+      try {
+        await bumpPeriodicQuestsOnLoginStreakEvent(user._id)
+      } catch (e) {
+        console.warn('[periodicQuest] google login streak bump:', e?.message)
+      }
+      try {
+        await incrementChallengeProgressByRequirement(user._id, 'streak', 1)
+      } catch (e) {
+        console.warn('[challenge] google login streak bump:', e?.message)
+      }
+    }
     return buildAuthResponse(user)
   } catch (e) {
-    if (e?.message === 'EMAIL_REQUIRED' || e?.message === 'ACCOUNT_BANNED') throw e
+    if (e?.message === 'EMAIL_REQUIRED' || e?.message === 'ACCOUNT_BANNED' || e?.message === 'ACCOUNT_INACTIVE') throw e
     throw new Error('SOCIAL_TOKEN_INVALID')
   }
 }
@@ -231,7 +260,10 @@ export const loginWithFacebook = async ({ accessToken }) => {
     })
 
     if (user?.status === 'banned') throw new Error('ACCOUNT_BANNED')
+    if (user?.status === 'inactive') throw new Error('ACCOUNT_INACTIVE')
 
+    const now = new Date()
+    let calendarAdvance = false
     if (!user) {
       const randomPassword = crypto.randomBytes(32).toString('hex') + 'Aa1'
       const hashedPassword = await hashPassword(randomPassword)
@@ -248,34 +280,42 @@ export const loginWithFacebook = async ({ accessToken }) => {
       try {
         await indexUser({ id: user._id.toString(), name: user.name, email: user.email, updatedAt: user.updatedAt })
       } catch (_) {}
+      calendarAdvance = updateUserStreakOnLogin(user, now).calendarAdvance
+      await user.save()
     } else {
-      let changed = false
       if (user.provider === 'facebook' && !user.providerId) {
         user.providerId = providerId
-        changed = true
       }
       if (!user.emailVerified) {
         user.emailVerified = true
-        changed = true
       }
       if (picture && !user.avatar) {
         user.avatar = picture
         user.markModified('avatar')
-        changed = true
       }
-      if (user.status === 'pending' || user.status === 'inactive') {
+      if (user.status === 'pending') {
         user.status = 'active'
-        changed = true
       }
-      user.lastActiveDate = new Date()
-      if (changed) await user.save()
-      else await user.updateOne({ $set: { lastActiveDate: user.lastActiveDate } })
+      calendarAdvance = updateUserStreakOnLogin(user, now).calendarAdvance
+      await user.save()
       user = await User.findById(user._id)
     }
 
+    if (calendarAdvance) {
+      try {
+        await bumpPeriodicQuestsOnLoginStreakEvent(user._id)
+      } catch (e) {
+        console.warn('[periodicQuest] facebook login streak bump:', e?.message)
+      }
+      try {
+        await incrementChallengeProgressByRequirement(user._id, 'streak', 1)
+      } catch (e) {
+        console.warn('[challenge] facebook login streak bump:', e?.message)
+      }
+    }
     return buildAuthResponse(user)
   } catch (e) {
-    if (e?.message === 'EMAIL_REQUIRED' || e?.message === 'ACCOUNT_BANNED') throw e
+    if (e?.message === 'EMAIL_REQUIRED' || e?.message === 'ACCOUNT_BANNED' || e?.message === 'ACCOUNT_INACTIVE') throw e
     throw new Error('SOCIAL_TOKEN_INVALID')
   }
 }
@@ -295,6 +335,20 @@ export const refreshAccessToken = async (refreshToken) => {
   if (tokenDoc.expiresAt < new Date()) {
     await RefreshToken.deleteOne({ _id: tokenDoc._id })
     throw new Error('REFRESH_TOKEN_EXPIRED')
+  }
+
+  const user = await User.findById(tokenDoc.userId).select('status').lean()
+  if (!user) {
+    await RefreshToken.deleteOne({ _id: tokenDoc._id })
+    throw new Error('INVALID_REFRESH_TOKEN')
+  }
+  if (user.status === 'banned') {
+    await RefreshToken.deleteOne({ _id: tokenDoc._id })
+    throw new Error('ACCOUNT_BANNED')
+  }
+  if (user.status === 'inactive') {
+    await RefreshToken.deleteOne({ _id: tokenDoc._id })
+    throw new Error('ACCOUNT_INACTIVE')
   }
 
   // Generate new access token

@@ -1,4 +1,5 @@
 import UserVocabRecent, { VOCAB_PRACTICE_MODES } from '../models/learning/UserVocabRecent.js'
+import { bumpPeriodicQuestsOnVocabularyNoteEvent } from './userPeriodicQuest.service.js'
 
 /** Khớp số chủ đề có sẵn trên FE (VOCAB_TOPIC_METAS.length) */
 export const VOCAB_PRESET_TOPIC_COUNT = 16
@@ -65,6 +66,12 @@ export async function recordVocabRecentVisit(userId, body) {
   doc.items.unshift(entry)
   doc.items = doc.items.slice(0, MAX_ITEMS)
   await doc.save()
+
+  try {
+    await bumpPeriodicQuestsOnVocabularyNoteEvent(userId)
+  } catch (e) {
+    console.warn('[periodicQuest] vocabulary note bump:', e?.message)
+  }
 
   return doc.items.map((x) => ({
     topicId: x.topicId,

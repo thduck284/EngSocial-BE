@@ -1,7 +1,6 @@
 import { User } from '../models/index.js'
 import * as matchmakingService from '../services/matchmaking.service.js'
-import { emitToUser } from '../config/socket.js'
-import fs from 'fs'
+import { emitToUser, isUserOnline } from '../config/socket.js'
 
 // Hàng chờ theo capacity (2, 4, 6, 8)
 const globalQueues = new Map()
@@ -12,7 +11,94 @@ ALLOWED_CAPACITIES.forEach((cap) => globalQueues.set(cap, []))
 // Quản lý phòng game (Room) thực tế
 export const rooms = new Map()
 
+/** Phòng không còn ai: xóa sau TTL (ms) thay vì xóa ngay khi socket drop */
+const EMPTY_ROOM_TTL_MS = 2 * 60 * 1000
+const emptyRoomDeletionTimers = new Map()
+
+function cancelEmptyRoomDeletion(code) {
+  const t = emptyRoomDeletionTimers.get(code)
+  if (t) {
+    clearTimeout(t)
+    emptyRoomDeletionTimers.delete(code)
+  }
+}
+
+function scheduleEmptyRoomDeletion(io, code) {
+  cancelEmptyRoomDeletion(code)
+  const timer = setTimeout(() => {
+    emptyRoomDeletionTimers.delete(code)
+    const room = rooms.get(code)
+    if (!room) return
+    if (room.slots.filter(Boolean).length === 0) {
+      rooms.delete(code)
+      console.log(`[Lobby] Room ${code} removed after ${EMPTY_ROOM_TTL_MS / 1000}s empty`)
+    }
+  }, EMPTY_ROOM_TTL_MS)
+  emptyRoomDeletionTimers.set(code, timer)
+}
+
 const roomChannel = (code) => `room:${code}`
+
+/** Phòng lobby socket đang tham gia — trên socket.data để merge có thể cập nhật (closure `currentRoomCode` không sửa được từ bên ngoài). */
+function getLobbyRoomCode(s) {
+  if (!s?.data) return null
+  return s.data.__lobbyRoomCode ?? null
+}
+function setLobbyRoomCode(s, code) {
+  if (!s) return
+  if (!s.data) s.data = {}
+  if (code == null || code === '') delete s.data.__lobbyRoomCode
+  else s.data.__lobbyRoomCode = code
+}
+
+/** Sau merge: mọi socket vẫn trỏ phòng `fromCode` → join `toCode` + cập nhật data (mọi tab cùng user trong phòng cũ). */
+function reassignSocketsAfterRoomMerge(io, fromCode, toCode) {
+  if (!fromCode || !toCode || fromCode === toCode) return
+  for (const s of io.sockets.sockets.values()) {
+    if (getLobbyRoomCode(s) !== fromCode) continue
+    try {
+      s.leave(roomChannel(fromCode))
+    } catch {
+      /* ignore */
+    }
+    try {
+      s.join(roomChannel(toCode))
+    } catch {
+      /* ignore */
+    }
+    setLobbyRoomCode(s, toCode)
+  }
+}
+
+/**
+ * Gửi event tới kênh phòng + room cá nhân user (mỗi user 1 lần).
+ * Không gọi thêm io.to(socketId) vì socket lobby đã join user:id — tránh cùng client nhận 2–3 lần (matchingEnd lặp).
+ */
+function broadcastLobbyEventToRoom(io, code, room, event, payload = {}) {
+  io.to(roomChannel(code)).emit(event, payload)
+  for (const slot of Array.isArray(room?.slots) ? room.slots : []) {
+    if (slot?.userId) emitToUser(io, String(slot.userId).trim(), event, payload)
+  }
+}
+
+/** Đồng bộ state lobby — room + user:id từng slot. */
+function broadcastRoomState(io, code, room) {
+  if (!code || !room) return
+  const findingMatch = !!room.findingMatch
+  const payload = sanitizeObject({ ...room, findingMatch })
+  io.to(roomChannel(code)).emit('wordScrambleLobby:state', payload)
+  for (const slot of Array.isArray(room?.slots) ? room.slots : []) {
+    if (slot?.userId) emitToUser(io, String(slot.userId).trim(), 'wordScrambleLobby:state', payload)
+  }
+}
+
+/** Bắt đầu trận — room + user:id. */
+function broadcastWordScrambleStarted(io, code, room, startedPayload) {
+  io.to(roomChannel(code)).emit('wordScrambleLobby:started', startedPayload)
+  for (const slot of Array.isArray(room?.slots) ? room.slots : []) {
+    if (slot?.userId) emitToUser(io, String(slot.userId).trim(), 'wordScrambleLobby:started', startedPayload)
+  }
+}
 
 const loadProfile = async (userId) => {
   const user = await User.findById(userId).select('name avatar level').lean()
@@ -117,7 +203,9 @@ async function processMatchmaking(io, capacity) {
         hostId: groupMembers[0].userId,
         slots: groupMembers.map(m => ({ ...m, ready: true })),
         chat: [],
+        findingMatch: false,
       }
+      cancelEmptyRoomDeletion(code)
       rooms.set(code, room)
 
       groupMembers.forEach(m => {
@@ -156,14 +244,13 @@ async function processMatchmaking(io, capacity) {
 
 export function registerWordScrambleLobbyHandlers(io, socket) {
   if (socket.userId) {
-    socket.join(`user:${socket.userId}`)
-    console.log(`[Lobby] Socket ${socket.id} joined personal room 'user:${socket.userId}'`)
+    const uid = String(socket.userId).trim()
+    socket.join(`user:${uid}`)
+    console.log(`[Lobby] Socket ${socket.id} joined personal room 'user:${uid}'`)
   }
 
   // GIA NHẬP KÊNH LOBBY CHUNG ĐỂ NHẬN THÔNG BÁO GHÉP TRẬN
   socket.join('room:lobby')
-
-  let currentRoomCode = null
 
   // Khởi động vòng lặp quét hàng chờ chỉ 1 lần duy nhất
   if (!intervalStarted) {
@@ -177,18 +264,22 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
   }
 
   const leaveRoom = () => {
-    if (currentRoomCode) {
-      const room = rooms.get(currentRoomCode)
+    const cur = getLobbyRoomCode(socket)
+    if (cur) {
+      const room = rooms.get(cur)
       if (room) {
-        room.slots = room.slots.filter((s) => s && s.socketId !== socket.id)
+        // Gán slot = null, KHÔNG dùng filter: filter bỏ cả ô null → mảng co lại → join báo 'full'.
+        const idx = room.slots.findIndex((s) => s && s.socketId === socket.id)
+        if (idx >= 0) room.slots[idx] = null
         if (room.slots.filter(Boolean).length === 0) {
-          rooms.delete(currentRoomCode)
+          scheduleEmptyRoomDeletion(io, cur)
         } else {
-          io.to(roomChannel(currentRoomCode)).emit('wordScrambleLobby:state', sanitizeObject(room))
+          cancelEmptyRoomDeletion(cur)
+          io.to(roomChannel(cur)).emit('wordScrambleLobby:state', sanitizeObject(room))
         }
       }
-      socket.leave(roomChannel(currentRoomCode))
-      currentRoomCode = null
+      socket.leave(roomChannel(cur))
+      setLobbyRoomCode(socket, null)
     }
     for (const queue of globalQueues.values()) {
       const idx = queue.findIndex((m) => m && m.socketId === socket.id)
@@ -197,6 +288,10 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
   }
 
   socket.on('disconnect', () => leaveRoom())
+
+  socket.on('wordScrambleLobby:leave', () => {
+    leaveRoom()
+  })
 
   socket.on('wordScrambleLobby:create', async (payload, ack) => {
     try {
@@ -207,9 +302,10 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
       const profile = await loadProfile(socket.userId)
       const slots = new Array(capacity).fill(null)
       slots[0] = { ...profile, ready: false, socketId: socket.id, joinedAt: Date.now() }
-      const room = { code, capacity, hostId: socket.userId, slots, chat: [] }
+      const room = { code, capacity, hostId: socket.userId, slots, chat: [], findingMatch: false }
+      cancelEmptyRoomDeletion(code)
       rooms.set(code, room)
-      currentRoomCode = code
+      setLobbyRoomCode(socket, code)
       socket.join(roomChannel(code))
       ack?.({ ok: true, roomCode: code, state: sanitizeObject(room) })
       socket.emit('wordScrambleLobby:state', sanitizeObject(room))
@@ -223,12 +319,37 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
       const code = String(payload?.roomCode || '').toUpperCase()
       const room = rooms.get(code)
       if (!room) return ack?.({ ok: false, error: 'not_found' })
+      // Phòng cũ có thể bị co slots do bug filter trước đây — chèn lại ô trống cho đủ capacity.
+      if (Array.isArray(room.slots) && room.slots.length < room.capacity) {
+        while (room.slots.length < room.capacity) room.slots.push(null)
+      }
+
+      // Đã ở đúng phòng (merge / đổi URL) — cập nhật socketId, không leaveRoom (tránh mất slot / lobby 3 người lệch)
+      if (getLobbyRoomCode(socket) === code) {
+        const myIdx = room.slots.findIndex((s) => s && String(s.userId) === String(socket.userId))
+        if (myIdx >= 0) {
+          const existing = room.slots[myIdx]
+          room.slots[myIdx] = {
+            ...existing,
+            socketId: socket.id,
+            ...(existing.socketId !== socket.id ? { joinedAt: Date.now() } : {}),
+          }
+          setLobbyRoomCode(socket, code)
+          socket.join(roomChannel(code))
+          cancelEmptyRoomDeletion(code)
+          ack?.({ ok: true, state: sanitizeObject(room) })
+          io.to(roomChannel(code)).emit('wordScrambleLobby:state', sanitizeObject(room))
+          return
+        }
+      }
+
       const emptySlotIdx = room.slots.findIndex((s) => s === null)
       if (emptySlotIdx === -1) return ack?.({ ok: false, error: 'full' })
       leaveRoom()
       const profile = await loadProfile(socket.userId)
       room.slots[emptySlotIdx] = { ...profile, ready: false, socketId: socket.id, joinedAt: Date.now() }
-      currentRoomCode = code
+      cancelEmptyRoomDeletion(code)
+      setLobbyRoomCode(socket, code)
       socket.join(roomChannel(code))
       ack?.({ ok: true, state: sanitizeObject(room) })
       io.to(roomChannel(code)).emit('wordScrambleLobby:state', sanitizeObject(room))
@@ -238,29 +359,31 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
   })
 
   socket.on('wordScrambleLobby:setReady', (payload) => {
-    if (!currentRoomCode) return
-    const room = rooms.get(currentRoomCode)
+    const cur = getLobbyRoomCode(socket)
+    if (!cur) return
+    const room = rooms.get(cur)
     const slot = room?.slots.find((s) => s?.socketId === socket.id)
     if (slot) {
       slot.ready = !!payload?.ready
-      io.to(roomChannel(currentRoomCode)).emit('wordScrambleLobby:state', sanitizeObject(room))
+      io.to(roomChannel(cur)).emit('wordScrambleLobby:state', sanitizeObject(room))
     }
   })
 
   socket.on('wordScrambleLobby:chat', (payload) => {
-    if (!currentRoomCode) return
-    const room = rooms.get(currentRoomCode)
+    const cur = getLobbyRoomCode(socket)
+    if (!cur) return
+    const room = rooms.get(cur)
     const profile = room?.slots.find((s) => s?.socketId === socket.id)
     if (profile && payload?.text) {
       const msg = { userId: socket.userId, name: profile.name, text: String(payload.text).substring(0, 200), ts: Date.now() }
       room.chat.push(msg)
       if (room.chat.length > 50) room.chat.shift()
-      io.to(roomChannel(currentRoomCode)).emit('wordScrambleLobby:chatMessage', msg)
+      io.to(roomChannel(cur)).emit('wordScrambleLobby:chatMessage', msg)
     }
   })
 
   socket.on('wordScrambleLobby:start', async (_payload, ack) => {
-    const code = currentRoomCode
+    const code = getLobbyRoomCode(socket)
     const room = rooms.get(code || '')
     if (!room || String(room.hostId) !== String(socket.userId)) {
       return ack?.({ ok: false, error: 'no_room_or_not_host' })
@@ -285,8 +408,29 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
       return ack?.({ ok: false, error: 'players_not_ready' })
     }
 
-    // ĐÁNH DẤU PHÒNG ĐANG TRONG TRẠNG THÁI TÌM TRẬN (Bật Radar)
+    // Đủ đúng party size → không gọi AI / không ghép thêm, vào trận luôn (không bật findingMatch)
+    if (occupied.length >= room.capacity) {
+      console.log(`[Lobby] [Private] Party full ${occupied.length}/${room.capacity} — skip AI, start game`)
+      room.findingMatch = false
+      if (room.lastMatchRequest) delete room.lastMatchRequest
+      broadcastRoomState(io, code, room)
+      const participantsIds = occupied.map(s => String(s.userId))
+      const startedPayload = sanitizeObject({
+        roomCode: code,
+        aiResult: null,
+        others: participantsIds,
+        fullRoom: room,
+      })
+      broadcastWordScrambleStarted(io, code, room, startedPayload)
+      return ack?.({ ok: true })
+    }
+
+    // ĐÁNH DẤU PHÒNG ĐANG TRONG TRẠNG THÁI TÌM TRẬN (Bật Radar) — findingMatch trong state để mọi client đồng bộ UI
     room.lastMatchRequest = Date.now()
+    room.findingMatch = true
+    broadcastRoomState(io, code, room)
+    // Mọi người trong slots + kênh phòng (đồng bộ UI ghép; user: kênh đã dùng cho invite)
+    broadcastLobbyEventToRoom(io, code, room, 'wordScrambleLobby:matching', {})
     console.log(`[Lobby] [Private] AI Polling for ${code}...`)
     
     const publicQueue = globalQueues.get(room.capacity) || []
@@ -323,7 +467,8 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
     ).catch(() => null)
 
     const matchEntityIdsFromAI = aiResult?.output?.ketQuaGhepNhom || []
-    
+    const occupiedCountBeforePull = occupied.length
+
     if (occupied.length < room.capacity && matchEntityIdsFromAI.length > 0) {
       for (const eid of matchEntityIdsFromAI) {
         if (occupied.length >= room.capacity) break
@@ -351,15 +496,12 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
                   occupied.push(room.slots[emptySlotIdx])
                   
                   console.log(`[Lobby] [MERGE] Pulled member ${member.name} (${member.userId}) into room ${code} at slot ${emptySlotIdx}`)
-                  
-                  // Chuyển người chơi sang phòng mới
-                  io.in(`user:${member.userId}`).socketsJoin(roomChannel(code))
-                  // Xóa họ khỏi phòng cũ
-                  const s = io.sockets.sockets.get(member.socketId)
-                  if (s) s.leave(roomChannel(targetRoomCode))
                 }
               }
+              // Cập nhật mọi socket vẫn trỏ phòng bị merge (data + join room) — tránh setReady/chat/start dùng mã phòng đã xóa
+              reassignSocketsAfterRoomMerge(io, targetRoomCode, code)
               // Giải tán phòng cũ
+              cancelEmptyRoomDeletion(targetRoomCode)
               rooms.delete(targetRoomCode)
             }
           }
@@ -372,11 +514,21 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
             if (emptySlotIdx >= 0) {
               room.slots[emptySlotIdx] = { ...matchedMember, ready: true }
               occupied.push(room.slots[emptySlotIdx])
-              io.in(`user:${matchedMember.userId}`).socketsJoin(roomChannel(code))
+              const qs = io.sockets.sockets.get(matchedMember.socketId)
+              if (qs) {
+                qs.join(roomChannel(code))
+                setLobbyRoomCode(qs, code)
+              }
             }
           }
         }
       }
+    }
+
+    // Người mới merge / kéo từ queue không có ở slots lúc broadcast đầu — bắn lại state + matching cho đủ socket
+    if (occupied.length > occupiedCountBeforePull) {
+      broadcastRoomState(io, code, room)
+      broadcastLobbyEventToRoom(io, code, room, 'wordScrambleLobby:matching', {})
     }
 
     if (occupied.length < room.capacity) {
@@ -384,16 +536,35 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
       return ack?.({ ok: false, error: 'not_enough_players' })
     }
 
-    // THÔNG BÁO CHO TẤT CẢ (BAO GỒM CẢ NHỮNG NGƯỜI MỚI ĐƯỢC PULL VÀO)
+    room.findingMatch = false
+    if (room.lastMatchRequest) delete room.lastMatchRequest
+    broadcastRoomState(io, code, room)
+
+    // THÔNG BÁO CHO TẤT CẢ (BAO GỒM CẢ NHỮNG NGƯỜI MỚI ĐƯỢC PULL VÀO) — matching đã emit lúc bắt đầu poll
     const participantsIds = occupied.map(s => String(s.userId))
-    io.to(roomChannel(code)).emit('wordScrambleLobby:matching', {})
-    io.to(roomChannel(code)).emit('wordScrambleLobby:started', sanitizeObject({
+    const startedPayload = sanitizeObject({
       roomCode: code,
       aiResult,
       others: participantsIds,
       fullRoom: room
-    }))
+    })
+    broadcastWordScrambleStarted(io, code, room, startedPayload)
 
+    ack?.({ ok: true })
+  })
+
+  /** Chủ phòng hủy ghép trận (UI matching) — vẫn ở trong phòng, không xóa thành viên */
+  socket.on('wordScrambleLobby:cancelStart', (_payload, ack) => {
+    const code = getLobbyRoomCode(socket)
+    if (!code) return ack?.({ ok: false, error: 'no_room' })
+    const room = rooms.get(code)
+    if (!room || String(room.hostId) !== String(socket.userId)) {
+      return ack?.({ ok: false, error: 'not_host' })
+    }
+    if (room.lastMatchRequest) delete room.lastMatchRequest
+    room.findingMatch = false
+    broadcastLobbyEventToRoom(io, code, room, 'wordScrambleLobby:matchingEnd', {})
+    broadcastRoomState(io, code, room)
     ack?.({ ok: true })
   })
 
@@ -418,38 +589,35 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
 
   // MỜI BẠN BÈ VÀO PHÒNG
   socket.on('wordScrambleLobby:invite', async (payload, ack) => {
-    try { fs.appendFileSync('invite_debug.log', `[${new Date().toISOString()}] Received invite: ${JSON.stringify(payload)} from ${socket.userId}\n`) } catch(e){}
-    
-    const { friendId, roomCode, inviteUrl } = payload
+    const { friendId: rawFriendId, roomCode: rawCode, inviteUrl } = payload || {}
+    const friendId = String(rawFriendId || '').trim()
+    const roomCode = String(rawCode || '').trim().toUpperCase()
     if (!friendId || !roomCode) {
-        try { fs.appendFileSync('invite_debug.log', 'Missing data\n') } catch(e){}
-        return ack?.({ ok: false, error: 'missing_data' })
+      return ack?.({ ok: false, error: 'missing_data' })
     }
 
     const room = rooms.get(roomCode)
     if (!room) {
-        try { fs.appendFileSync('invite_debug.log', 'Room not found\n') } catch(e){}
-        return ack?.({ ok: false, error: 'room_not_found' })
+      return ack?.({ ok: false, error: 'room_not_found' })
     }
-    
+
     let inviterName = 'Ai đó'
     try {
       const profile = await loadProfile(socket.userId)
       inviterName = profile?.name || 'Ai đó'
-    } catch(err) { }
+    } catch {
+      /* ignore */
+    }
 
-    try { fs.appendFileSync('invite_debug.log', `Emit to ${friendId}: ${inviterName}\n`) } catch(e){}
-
-    // Gửi thông báo đến phòng cá nhân của người bạn
+    const friendOnline = isUserOnline(String(friendId))
     emitToUser(io, friendId, 'wordScrambleLobby:inviteReceived', {
       inviterName,
       inviterId: socket.userId,
       roomCode,
-      inviteUrl
+      inviteUrl,
     })
 
-    console.log(`[Lobby] [Invite] ${inviterName} invited ${friendId} to ${roomCode}`)
-    try { fs.appendFileSync('invite_debug.log', `Success\n`) } catch(e){}
-    ack?.({ ok: true })
+    console.log(`[Lobby] [Invite] ${inviterName} invited ${friendId} to ${roomCode} (friendOnline=${friendOnline})`)
+    ack?.({ ok: true, friendOnline })
   })
 }

@@ -75,6 +75,10 @@ const userSchema = new mongoose.Schema({
   lastActiveDate: Date,
   /** Lần truy cập cuối (cập nhật khi gọi API); dùng cho tin nhắn tự xóa khi offline 5p */
   lastAccessedAt: Date,
+  /** Số liệu tích lũy phục vụ achievements (vd. phút online từ bump chat). */
+  achievementStats: {
+    onlineMinutes: { type: Number, default: 0, min: 0 },
+  },
   preferences: {
     language: {
       type: String,

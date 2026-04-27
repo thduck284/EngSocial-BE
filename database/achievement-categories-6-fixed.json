@@ -1,0 +1,85 @@
+{
+  "note": "6 category achievement cố định trên FE (achievementsCatalog). Dùng file này để quyết achievement mới thuộc nhóm nào — seed Mongo nên có field categoryId trùng id bên dưới.",
+  "fixedCategories": [
+    {
+      "id": "learning",
+      "i18n": "achievementsCatalog.categories.learning",
+      "label": { "vi": "Học tập", "en": "Learning" },
+      "putAchievementsHere": [
+        "Đăng nhập / streak học (login streak).",
+        "Thời gian online tích lũy.",
+        "Tổng số bài học + luyện khi không tách theo Reading/Listening/Writing.",
+        "Mốc XP tổng, level (tiến độ học chung)."
+      ],
+      "alignsWithQuestFilters": ["login_streak", "online_time", "lesson", "practice"],
+      "alignsWithChallengeTypes": ["streak", "time", "lessons"],
+      "exampleKeys": ["login_streak", "online_time_minutes_60", "xp_total_1000"]
+    },
+    {
+      "id": "skills",
+      "i18n": "achievementsCatalog.categories.skills",
+      "label": { "vi": "Kỹ năng", "en": "Skills" },
+      "putAchievementsHere": [
+        "Reading / Listening / Writing: đếm bài theo từng skill.",
+        "Điểm bài làm, tổng điểm theo skill.",
+        "Ngưỡng % điểm (min score) trên bài của một skill."
+      ],
+      "alignsWithQuestFilters": ["lesson", "practice"],
+      "alignsWithChallengeTypes": ["lessons", "score"],
+      "exampleKeys": ["reading_lessons_5", "listening_score_sum_200", "writing_min_score_90"]
+    },
+    {
+      "id": "vocab",
+      "i18n": "achievementsCatalog.categories.vocab",
+      "label": { "vi": "Từ vựng & Ôn tập", "en": "Vocabulary & review" },
+      "putAchievementsHere": [
+        "Ghi chú từ, sổ từ, ôn từ (vocabulary notes).",
+        "Thói quen ôn flashcard / recall nếu có hook sau này."
+      ],
+      "alignsWithQuestFilters": ["vocabulary_notes"],
+      "alignsWithChallengeTypes": [],
+      "exampleKeys": ["vocab_notes_saved_25", "vocab_notes_saved_100"]
+    },
+    {
+      "id": "quests",
+      "i18n": "achievementsCatalog.categories.quests",
+      "label": { "vi": "Nhiệm vụ & Thử thách", "en": "Quests & challenges" },
+      "putAchievementsHere": [
+        "Số daily / weekly / one-time quest đã hoàn thành.",
+        "Periodic quest slot đã xong.",
+        "Meta: tham gia / hoàn thành challenge (nếu đếm được)."
+      ],
+      "alignsWithQuestFilters": ["all"],
+      "alignsWithChallengeTypes": ["lessons", "score", "time", "streak"],
+      "exampleKeys": ["daily_quests_completed_7", "periodic_slots_completed_20", "challenge_completed_1"]
+    },
+    {
+      "id": "community",
+      "i18n": "achievementsCatalog.categories.community",
+      "label": { "vi": "Cộng đồng", "en": "Community" },
+      "putAchievementsHere": [
+        "Đăng bài, feed, nội dung công khai.",
+        "Bình luận, like (khi có đếm từ BE)."
+      ],
+      "alignsWithQuestFilters": ["community_post"],
+      "alignsWithChallengeTypes": [],
+      "exampleKeys": ["community_posts_1", "community_posts_10", "comments_written_20"]
+    },
+    {
+      "id": "social",
+      "i18n": "achievementsCatalog.categories.social",
+      "label": { "vi": "Bạn bè & Chat", "en": "Friends & chat" },
+      "putAchievementsHere": [
+        "Kết bạn, lời mời được chấp nhận.",
+        "Chat, nhóm, tin nhắn."
+      ],
+      "alignsWithQuestFilters": ["friends"],
+      "alignsWithChallengeTypes": [],
+      "exampleKeys": ["friends_added_1", "friends_added_10", "groups_joined_3"]
+    }
+  ],
+  "overlapRule": {
+    "vi": "Nếu một hành động vừa là community vừa là quest: ưu tiên category theo ý nghĩa chính (vd. đăng bài → community; hoàn thành quest community_post → có thể ghi nhận ở community hoặc quests tùy product).",
+    "en": "If an action fits both community and quests, pick one primary category for the achievement row (e.g. post created → community; quest completion counters → quests)."
+  }
+}
