@@ -64,6 +64,13 @@ export const acceptRequest = async (req, res, next) => {
     if (io) {
       emitToUser(io, recipientId, 'notification', notification)
     }
+
+    // Achievement sync (fire-and-forget)
+    import('../services/achievementUnlock.service.js').then(({ checkAndUnlockAchievements }) => {
+      checkAndUnlockAchievements(recipientId, { io }).catch(() => {})
+      checkAndUnlockAchievements(accepterId, { io }).catch(() => {})
+    })
+
     return sendSuccess(res, {
       messageKey: 'friend.requestAccepted',
       data: { friendship },
@@ -158,6 +165,18 @@ export const searchFriends = async (req, res, next) => {
       messageKey: 'friend.searchSuccess',
       data: result.users,
       pagination: result.pagination,
+    }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const getSuggestions = async (req, res, next) => {
+  try {
+    const { limit } = req.query
+    const suggestions = await friendService.getFriendSuggestions(req.userId, { limit })
+    return sendSuccess(res, {
+      data: suggestions,
     }, req)
   } catch (error) {
     next(error)

@@ -1,12 +1,30 @@
 import mongoose from 'mongoose'
-import Quest, { QUEST_FILTER_CATEGORIES } from '../models/gamification/Quest.js'
 import PeriodicQuestPool from '../models/gamification/PeriodicQuestPool.js'
 import { sendSuccess, sendError } from '../dto/index.js'
-import { readTargetBounds, listMyQuestProgress } from '../services/questProgress.service.js'
 import {
   ensureUserPeriodicQuests,
   serializePeriodicQuestForClient,
 } from '../services/userPeriodicQuest.service.js'
+
+export const QUEST_FILTER_CATEGORIES = [
+  'all',
+  'lesson',
+  'practice',
+  'friends',
+  'vocabulary_notes',
+  'community_post',
+  'login_streak',
+  'online_time',
+]
+
+function readTargetBounds(condition = {}) {
+  let targetMin = Number(condition.targetMin ?? condition.target ?? 1)
+  if (!Number.isFinite(targetMin) || targetMin < 1) targetMin = 1
+  let targetMax = Number(condition.targetMax ?? condition.target ?? targetMin)
+  if (!Number.isFinite(targetMax) || targetMax < 1) targetMax = targetMin
+  if (targetMax < targetMin) targetMax = targetMin
+  return { targetMin, targetMax }
+}
 
 /** Không dùng skill / minScorePercent — nhiệm vụ xã hội hoặc engagement (streak, thời gian online). */
 const NO_SKILL_SCORE_QUEST_CATEGORIES = [
@@ -93,20 +111,7 @@ export const getMyPeriodicQuests = async (req, res, next) => {
   }
 }
 
-/**
- * Tiến độ quest catalog (Quest) — legacy; periodic dùng GET /quests/my/period
- * GET /api/quests/my/progress
- */
-export const getMyQuestProgress = async (req, res, next) => {
-  try {
-    const userId = req.userId
-    const status = req.query.status || 'active'
-    const data = await listMyQuestProgress(userId, { status })
-    return sendSuccess(res, { data }, req)
-  } catch (error) {
-    next(error)
-  }
-}
+
 
 /**
  * Kho mẫu quest chu kỳ (PeriodicQuestPool) — mod/admin.
@@ -216,118 +221,5 @@ export const deletePeriodicQuestPoolEntry = async (req, res, next) => {
   }
 }
 
-export const getQuests = async (req, res, next) => {
-  try {
-    const { type, status } = req.query
-    const filter = {}
-    if (status === 'all' || status === '*') {
-      /* staff list: mọi trạng thái */
-    } else {
-      filter.status = status || 'active'
-    }
-    if (type) filter.type = type
-    const docs = await Quest.find(filter)
-      .sort({ order: 1, createdAt: -1 })
-      .lean()
-    const data = docs.map((q) => ({
-      ...q,
-      id: q._id?.toString() || q.id,
-    }))
-    return sendSuccess(res, { data }, req)
-  } catch (error) {
-    next(error)
-  }
-}
 
-/**
- * Get single quest by id (admin)
- * GET /api/quests/:id
- */
-export const getQuestById = async (req, res, next) => {
-  try {
-    const { id } = req.params
-    const quest = await Quest.findById(id).lean()
-    if (!quest) {
-      return sendError(res, { statusCode: 404, message: 'Quest not found' }, req)
-    }
-    return sendSuccess(res, { data: { ...quest, id: quest._id?.toString() } }, req)
-  } catch (error) {
-    next(error)
-  }
-}
-
-/**
- * Create quest (admin)
- * POST /api/quests
- */
-export const createQuest = async (req, res, next) => {
-  try {
-    const body = req.body
-    const condition = normalizeCondition(body)
-    const payload = {
-      title: body.title,
-      description: body.description ?? '',
-      type: body.type || 'daily',
-      condition,
-      xpReward: body.xpReward ?? 50,
-      icon: body.icon || 'flag',
-      status: body.status || 'active',
-      order: body.order ?? 0,
-    }
-    const quest = await Quest.create(payload)
-    return sendSuccess(res, { data: { ...quest.toObject(), id: quest._id.toString() } }, req, 201)
-  } catch (error) {
-    next(error)
-  }
-}
-
-/**
- * Update quest (admin)
- * PUT /api/quests/:id
- */
-export const updateQuest = async (req, res, next) => {
-  try {
-    const body = { ...req.body }
-    if (
-      body.condition
-      || body.targetValue != null
-      || body.skill
-      || body.targetMin != null
-      || body.targetMax != null
-    ) {
-      body.condition = normalizeCondition(body)
-    }
-    delete body.targetType
-    delete body.targetValue
-    delete body.skill
-    if (body.condition && body.condition.type) delete body.condition.type
-    const quest = await Quest.findByIdAndUpdate(
-      req.params.id,
-      body,
-      { new: true, runValidators: true }
-    ).lean()
-    if (!quest) {
-      return sendError(res, { statusCode: 404, message: 'Quest not found' }, req)
-    }
-    return sendSuccess(res, { data: { ...quest, id: quest._id?.toString() } }, req)
-  } catch (error) {
-    next(error)
-  }
-}
-
-/**
- * Delete quest (admin)
- * DELETE /api/quests/:id
- */
-export const deleteQuest = async (req, res, next) => {
-  try {
-    const deleted = await Quest.findByIdAndDelete(req.params.id)
-    if (!deleted) {
-      return sendError(res, { statusCode: 404, message: 'Quest not found' }, req)
-    }
-    return sendSuccess(res, { message: 'Deleted' }, req)
-  } catch (error) {
-    next(error)
-  }
-}
 

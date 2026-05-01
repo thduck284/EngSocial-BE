@@ -71,6 +71,12 @@ export const createPost = async (req, res, next) => {
   try {
     const io = req.app.get('io')
     const post = await communityService.createPost(req.userId, req.body, io)
+
+    // Achievement sync (fire-and-forget)
+    import('../services/achievementUnlock.service.js').then(({ checkAndUnlockAchievements }) => {
+      checkAndUnlockAchievements(req.userId, { io }).catch(() => {})
+    })
+
     return sendSuccess(res, {
       statusCode: 201,
       messageKey: 'community.postCreated',
@@ -216,6 +222,12 @@ export const createComment = async (req, res, next) => {
   try {
     const io = req.app.get('io')
     const comment = await communityService.createComment(req.userId, req.params.postId, req.body, io)
+
+    // Achievement sync (fire-and-forget)
+    import('../services/achievementUnlock.service.js').then(({ checkAndUnlockAchievements }) => {
+      checkAndUnlockAchievements(req.userId, { io }).catch(() => {})
+    })
+
     return sendSuccess(res, {
       statusCode: 201,
       messageKey: 'community.commentCreated',

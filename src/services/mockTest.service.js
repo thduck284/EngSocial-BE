@@ -17,8 +17,21 @@ export const recordSession = async (userId, payload) => {
   }).populate('lessonId').lean()
 
   const allGraded = progressEntries.every(p => p.status === 'completed')
-  const totalScore = progressEntries.reduce((sum, p) => sum + (p.score || 0), 0)
-  const totalMax = progressEntries.reduce((sum, p) => sum + (p.maxScore || 0), 0)
+  
+  const totalScore = progressEntries.reduce((sum, p) => {
+    // For writing, if not graded yet, use aiScore if available
+    const score = (p.score !== null && p.score !== undefined) 
+      ? p.score 
+      : (p.submission?.aiScore || 0)
+    return sum + score
+  }, 0)
+
+  const totalMax = progressEntries.reduce((sum, p) => {
+    let max = p.maxScore || 0
+    // Default writing maxScore to 100 if it's 0
+    if (max === 0 && p.lessonId?.skill === 'writing') max = 100
+    return sum + max
+  }, 0)
 
   const session = await MockTestResult.create({
     userId,
@@ -78,8 +91,18 @@ export const updateSessionStatusIfCompleted = async (lessonResultId) => {
   if (!session) return
 
   // Always recalculate scores (writing score was null at session creation)
-  session.overallScore = session.lessonResults.reduce((sum, r) => sum + (r.score || 0), 0)
-  session.maxTotalScore = session.lessonResults.reduce((sum, r) => sum + (r.maxScore || 0), 0)
+  session.overallScore = session.lessonResults.reduce((sum, r) => {
+    const score = (r.score !== null && r.score !== undefined) 
+      ? r.score 
+      : (r.submission?.aiScore || 0)
+    return sum + score
+  }, 0)
+
+  session.maxTotalScore = session.lessonResults.reduce((sum, r) => {
+    let max = r.maxScore || 0
+    if (max === 0 && r.lessonId?.skill === 'writing') max = 100
+    return sum + max
+  }, 0)
 
   const allGraded = session.lessonResults.every(r => r.status === 'completed')
   if (allGraded) {

@@ -1,3 +1,4 @@
+import mongoose from 'mongoose'
 import UserPeriodicQuest from '../models/gamification/UserPeriodicQuest.js'
 import PeriodicQuestPool from '../models/gamification/PeriodicQuestPool.js'
 import { User } from '../models/index.js'
@@ -13,14 +14,18 @@ export function dailyPeriodKey(d = new Date()) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }
 
-export function weeklyPeriodKey(d = new Date()) {
+export function getISOWeekNumber(d = new Date()) {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
   const dayNum = date.getUTCDay() || 7
   date.setUTCDate(date.getUTCDate() + 4 - dayNum)
   const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1))
   const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7)
-  const y = date.getUTCFullYear()
-  return `${y}-W${String(weekNo).padStart(2, '0')}`
+  return { weekNo, year: date.getUTCFullYear() }
+}
+
+export function weeklyPeriodKey(d = new Date()) {
+  const { weekNo, year } = getISOWeekNumber(d)
+  return `${year}-W${String(weekNo).padStart(2, '0')}`
 }
 
 export function currentPeriodKey(periodType, d = new Date()) {
@@ -46,14 +51,9 @@ function pickEffectiveTarget(targetMin, targetMax) {
 }
 
 async function purgeStalePeriods(userId, now = new Date()) {
-  for (const periodType of ['daily', 'weekly']) {
-    const key = currentPeriodKey(periodType, now)
-    await UserPeriodicQuest.deleteMany({
-      userId,
-      periodType,
-      periodKey: { $ne: key },
-    })
-  }
+  // We no longer delete stale periods to keep history as requested.
+  // The frontend and backend already filter by the current periodKey.
+  return
 }
 
 function poolRowToTemplate(row) {
@@ -72,10 +72,23 @@ function poolRowToTemplate(row) {
 /**
  * Lấy ngẫu nhiên `count` mục từ kho DB (xáo trộn; nếu kho ít hơn count thì lặp lại mục).
  */
-async function samplePoolEntries(periodType, count) {
-  const pool = await PeriodicQuestPool.find({ periodType, status: 'active' }).lean()
+async function samplePoolEntries(periodType, count, excludePoolIds = []) {
+  const filter = { periodType, status: 'active' }
+  if (excludePoolIds && excludePoolIds.length > 0) {
+    const objectIds = excludePoolIds.map((id) => (typeof id === 'string' ? new mongoose.Types.ObjectId(id) : id))
+    filter._id = { $nin: objectIds }
+  }
+
+  let pool = await PeriodicQuestPool.find(filter).lean()
+
+  // If filtered pool is too small, fallback to full pool but keep shuffle
+  if (pool.length < count) {
+    pool = await PeriodicQuestPool.find({ periodType, status: 'active' }).lean()
+  }
+
   if (!pool.length) return []
   const shuffled = shuffle(pool)
+
   if (shuffled.length >= count) {
     return shuffled.slice(0, count).map(poolRowToTemplate)
   }
@@ -92,12 +105,28 @@ async function ensureSlotsForPeriod(userId, periodType, now = new Date()) {
   const need = PERIODIC_SLOT_COUNTS[periodType] ?? 0
   const periodKey = currentPeriodKey(periodType, now)
 
-  const existing = await UserPeriodicQuest.find({ userId, periodType, periodKey })
+  const mid = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId
+  const existing = await UserPeriodicQuest.find({ userId: mid, periodType, periodKey })
     .sort({ slotIndex: 1 })
     .lean()
   if (existing.length >= need) return
 
-  const picks = await samplePoolEntries(periodType, need)
+  // Logic "Làm mới": Lấy template của kỳ trước để loại trừ, đảm bảo bốc ra quest khác
+  let prevKey = ''
+  if (periodType === 'daily') {
+    const d = new Date(now)
+    d.setDate(d.getDate() - 1)
+    prevKey = dailyPeriodKey(d)
+  } else {
+    const d = new Date(now)
+    d.setDate(d.getDate() - 7)
+    prevKey = weeklyPeriodKey(d)
+  }
+
+  const prevDocs = await UserPeriodicQuest.find({ userId: mid, periodType, periodKey: prevKey }).select('poolEntryId').lean()
+  const excludePoolIds = prevDocs.map((d) => d.poolEntryId).filter(Boolean)
+
+  const picks = await samplePoolEntries(periodType, need, excludePoolIds)
   if (!picks.length) {
     console.warn(`[userPeriodicQuest] PeriodicQuestPool trống cho periodType=${periodType}. Chạy: npm run db:seed:quest-pool`)
     return
@@ -109,7 +138,7 @@ async function ensureSlotsForPeriod(userId, periodType, now = new Date()) {
   for (let slotIndex = 0; slotIndex < need; slotIndex++) {
     if (existingSlot.has(slotIndex)) continue
 
-    const hasDoc = await UserPeriodicQuest.findOne({ userId, periodType, periodKey, slotIndex })
+    const hasDoc = await UserPeriodicQuest.findOne({ userId: mid, periodType, periodKey, slotIndex })
     if (hasDoc) continue
 
     const tpl = picks[pickCursor % picks.length]
@@ -119,7 +148,7 @@ async function ensureSlotsForPeriod(userId, periodType, now = new Date()) {
 
     try {
       await UserPeriodicQuest.create({
-        userId,
+        userId: mid,
         periodType,
         periodKey,
         slotIndex,
@@ -148,7 +177,6 @@ async function ensureSlotsForPeriod(userId, periodType, now = new Date()) {
  * Đảm bảo đủ slot theo kỳ; xóa bản ghi kỳ cũ. Quest đã tạo cho user + periodKey giữ nguyên, không tạo lại.
  */
 export async function ensureUserPeriodicQuests(userId, now = new Date()) {
-  await UserPeriodicQuest.deleteMany({ userId, periodType: 'monthly' })
   await purgeStalePeriods(userId, now)
   await ensureSlotsForPeriod(userId, 'daily', now)
   await ensureSlotsForPeriod(userId, 'weekly', now)

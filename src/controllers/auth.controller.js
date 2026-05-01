@@ -1,5 +1,6 @@
 import * as authService from '../services/auth.service.js'
 import { sendSuccess, sendError } from '../dto/index.js'
+import { checkAndUnlockAchievements } from '../services/achievementUnlock.service.js'
 
 /**
  * Register new user
@@ -37,6 +38,15 @@ export const login = async (req, res, next) => {
 
     const data = await authService.login({ email, password })
 
+    // Fire-and-forget achievement check (streak-based)
+    const userId = data?.user?.id || data?.user?._id
+    if (userId) {
+      const io = req.app.get('io')
+      checkAndUnlockAchievements(userId, { io }).catch((e) =>
+        console.warn('[achievement] login check failed:', e?.message)
+      )
+    }
+
     return sendSuccess(res, {
       messageKey: 'auth.loginSuccess',
       data,
@@ -72,28 +82,27 @@ export const loginWithGoogle = async (req, res, next) => {
   try {
     const { idToken } = req.body
     const data = await authService.loginWithGoogle({ idToken })
+    // Fire-and-forget achievement check
+    const userId = data?.user?.id || data?.user?._id
+    if (userId) {
+      const io = req.app.get('io')
+      checkAndUnlockAchievements(userId, { io }).catch((e) =>
+        console.warn('[achievement] loginWithGoogle check failed:', e?.message)
+      )
+    }
     return sendSuccess(res, {
       messageKey: 'auth.loginSuccess',
       data,
     }, req)
   } catch (error) {
     if (error.message === 'ACCOUNT_BANNED') {
-      return sendError(res, {
-        statusCode: 403,
-        messageKey: 'auth.accountBanned',
-      }, req)
+      return sendError(res, { statusCode: 403, messageKey: 'auth.accountBanned' }, req)
     }
     if (error.message === 'ACCOUNT_INACTIVE') {
-      return sendError(res, {
-        statusCode: 403,
-        messageKey: 'auth.accountInactive',
-      }, req)
+      return sendError(res, { statusCode: 403, messageKey: 'auth.accountInactive' }, req)
     }
     if (error.message === 'SOCIAL_TOKEN_INVALID') {
-      return sendError(res, {
-        statusCode: 401,
-        messageKey: 'auth.invalidCredentials',
-      }, req)
+      return sendError(res, { statusCode: 401, messageKey: 'auth.invalidCredentials' }, req)
     }
     if (error.message === 'EMAIL_REQUIRED') {
       return sendError(res, {
@@ -114,28 +123,27 @@ export const loginWithFacebook = async (req, res, next) => {
   try {
     const { accessToken } = req.body
     const data = await authService.loginWithFacebook({ accessToken })
+    // Fire-and-forget achievement check
+    const userId = data?.user?.id || data?.user?._id
+    if (userId) {
+      const io = req.app.get('io')
+      checkAndUnlockAchievements(userId, { io }).catch((e) =>
+        console.warn('[achievement] loginWithFacebook check failed:', e?.message)
+      )
+    }
     return sendSuccess(res, {
       messageKey: 'auth.loginSuccess',
       data,
     }, req)
   } catch (error) {
     if (error.message === 'ACCOUNT_BANNED') {
-      return sendError(res, {
-        statusCode: 403,
-        messageKey: 'auth.accountBanned',
-      }, req)
+      return sendError(res, { statusCode: 403, messageKey: 'auth.accountBanned' }, req)
     }
     if (error.message === 'ACCOUNT_INACTIVE') {
-      return sendError(res, {
-        statusCode: 403,
-        messageKey: 'auth.accountInactive',
-      }, req)
+      return sendError(res, { statusCode: 403, messageKey: 'auth.accountInactive' }, req)
     }
     if (error.message === 'SOCIAL_TOKEN_INVALID') {
-      return sendError(res, {
-        statusCode: 401,
-        messageKey: 'auth.invalidCredentials',
-      }, req)
+      return sendError(res, { statusCode: 401, messageKey: 'auth.invalidCredentials' }, req)
     }
     if (error.message === 'EMAIL_REQUIRED') {
       return sendError(res, {

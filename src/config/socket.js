@@ -1,8 +1,9 @@
 import mongoose from 'mongoose'
 import { verifyToken } from '../utils/jwt.js'
 import { Conversation, User } from '../models/index.js'
-import { registerWordScrambleLobbyHandlers, rooms } from '../sockets/wordScrambleLobby.js'
+import { registerWordScrambleLobbyHandlers, rooms as wordScrambleRooms } from '../sockets/wordScrambleLobby.js'
 import { registerWordScrambleGameHandlers } from '../sockets/wordScrambleGame.js'
+import { registerSnakeGameGameHandlers } from '../sockets/snakeGameGame.js'
 
 const corsOrigin = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
@@ -89,19 +90,44 @@ export function setupSocket(io) {
     return partnerIds
   }
 
+  /** Map: socketId -> connection timestamp (ms) */
+  const socketConnectedAt = new Map()
+
   io.on('connection', (socket) => {
     registerWordScrambleLobbyHandlers(io, socket)
-    registerWordScrambleGameHandlers(io, socket, rooms)
+    registerWordScrambleGameHandlers(io, socket, wordScrambleRooms)
+    registerSnakeGameGameHandlers(io, socket)
     if (socket.userId) {
       registerUserSocket(socket.userId, socket.id)
+      socketConnectedAt.set(socket.id, Date.now())
+
       getConversationPartnerIds(socket.userId).then((partnerIds) => {
         partnerIds.forEach((partnerId) => {
           emitToUser(io, partnerId, 'conversation:userOnline', { userId: socket.userId })
         })
       }).catch(() => {})
     }
+
     socket.on('disconnect', () => {
       const userId = socket.userId
+      const connectedAt = socketConnectedAt.get(socket.id)
+      socketConnectedAt.delete(socket.id)
+
+      // Bump online minutes on disconnect for the partial time
+      if (userId && connectedAt) {
+        const minutes = Math.floor((Date.now() - connectedAt) / 60000)
+        if (minutes > 0) {
+          User.updateOne(
+            { _id: userId },
+            { $inc: { 'achievementStats.onlineMinutes': minutes } }
+          ).then(() => {
+            import('../services/achievementUnlock.service.js').then(({ checkAndUnlockAchievements }) => {
+              checkAndUnlockAchievements(userId, { io })
+            })
+          }).catch(() => {})
+        }
+      }
+
       unregisterSocket(socket.id)
       if (userId) {
         getConversationPartnerIds(userId).then((partnerIds) => {
@@ -112,6 +138,41 @@ export function setupSocket(io) {
       }
     })
   })
+
+  // Periodically bump online minutes for all active sockets (every 1 minute)
+  setInterval(async () => {
+    const userToMinutes = new Map()
+    const now = Date.now()
+
+    for (const [socketId, connectedAt] of socketConnectedAt.entries()) {
+      const socket = io.sockets.sockets.get(socketId)
+      const userId = socket?.userId
+      if (userId) {
+        const elapsed = now - connectedAt
+        if (elapsed >= 60000) {
+          userToMinutes.set(userId, (userToMinutes.get(userId) || 0) + 1)
+          // Reset connection time to "now" so we only count the next minute later
+          socketConnectedAt.set(socketId, now)
+        }
+      }
+    }
+
+    if (userToMinutes.size > 0) {
+      const { checkAndUnlockAchievements } = await import('../services/achievementUnlock.service.js')
+      for (const [userId, minutes] of userToMinutes.entries()) {
+        try {
+          await User.updateOne(
+            { _id: userId },
+            { $inc: { 'achievementStats.onlineMinutes': minutes } }
+          )
+          // Check achievements after bumping minutes
+          await checkAndUnlockAchievements(userId, { io })
+        } catch (e) {
+          console.warn('[socket] online minutes bump error:', e?.message)
+        }
+      }
+    }
+  }, 60000)
 }
 
 export default socketOptions

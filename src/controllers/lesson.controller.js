@@ -5,6 +5,7 @@ import * as lessonService from '../services/lesson.service.js'
 import { LessonDTO, LessonDetailDTO } from '../dto/learning/response/lesson.response.js'
 import { sendSuccess, sendPaginated, sendError } from '../dto/index.js'
 import { generateUniqueSlug } from '../utils/slug.js'
+import { checkAndUnlockAchievements } from '../services/achievementUnlock.service.js'
 
 /**
  * Get lessons list with optional filters and pagination
@@ -97,11 +98,12 @@ export const getMyProgress = async (req, res, next) => {
  */
 export const getDashboard = async (req, res, next) => {
   try {
-    const featuredLessons = await Lesson.find({ status: 'published', featured: true })
-      .sort({ rating: -1, completionCount: -1 })
-      .limit(6)
-      .select('title slug skill level topic thumbnail estimatedTime xpReward rating')
+    const featuredLessons = await Lesson.find({ status: 'published' })
+      .sort({ completionCount: -1, rating: -1 })
+      .limit(5)
+      .select('title slug skill level topic thumbnail estimatedTime xpReward rating category completionCount')
       .lean()
+
     const data = {
       skillStats: [],
       featuredLessons: featuredLessons.map((l) => new LessonDTO(l).toJSON()),
@@ -596,6 +598,11 @@ export const submitLessonAnswers = async (req, res, next) => {
       xpEarnedThisAttempt: lastAttempt?.xpEarned ?? 0,
       rewardEligible: (lastAttempt?.progress ?? 0) >= 80,
     }
+    // Fire-and-forget achievement check
+    const io = req.app.get('io')
+    checkAndUnlockAchievements(req.userId, { io }).catch((e) =>
+      console.warn('[achievement] submitLessonAnswers check failed:', e?.message)
+    )
     return sendSuccess(res, { data }, req)
   } catch (error) {
     next(error)
@@ -622,6 +629,11 @@ export const submitWritingLesson = async (req, res, next) => {
       timeSpent,
       isMockTest
     })
+    // Fire-and-forget achievement check
+    const io = req.app.get('io')
+    checkAndUnlockAchievements(req.userId, { io }).catch((e) =>
+      console.warn('[achievement] submitWritingLesson check failed:', e?.message)
+    )
     return sendSuccess(res, { data: progress }, req)
   } catch (error) {
     next(error)
@@ -709,6 +721,11 @@ export const gradeUserWriting = async (req, res, next) => {
     }
 
     const result = await lessonService.gradeUserWriting(id, userId, { score, feedback })
+    // Fire-and-forget achievement check for the student who got graded
+    const io = req.app.get('io')
+    checkAndUnlockAchievements(userId, { io }).catch((e) =>
+      console.warn('[achievement] gradeUserWriting check failed:', e?.message)
+    )
     return sendSuccess(res, {
       message: 'Graded successfully',
       data: result,

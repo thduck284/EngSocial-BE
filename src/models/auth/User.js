@@ -62,6 +62,15 @@ const userSchema = new mongoose.Schema({
     default: 0,
     min: 0,
   },
+  weeklyXp: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  lastWeeklyXpReset: {
+    type: Date,
+    default: null,
+  },
   streak: {
     type: Number,
     default: 0,
@@ -78,6 +87,8 @@ const userSchema = new mongoose.Schema({
   /** Số liệu tích lũy phục vụ achievements (vd. phút online từ bump chat). */
   achievementStats: {
     onlineMinutes: { type: Number, default: 0, min: 0 },
+    vocabularyNotesCount: { type: Number, default: 0, min: 0 },
+    customWordsCount: { type: Number, default: 0, min: 0 },
   },
   preferences: {
     language: {
@@ -145,11 +156,35 @@ userSchema.index({ totalXp: -1 })
 userSchema.index({ level: -1, xp: -1 })
 userSchema.index({ status: 1 })
 
+// Helper to get week identifier (ISO 8601)
+const getWeekIdentifier = (d) => {
+  const date = new Date(d)
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() + 4 - (date.getDay() || 7))
+  const yearStart = new Date(date.getFullYear(), 0, 1)
+  const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7)
+  return `${date.getFullYear()}-W${weekNo}`
+}
+
 // Check and update level based on XP
 userSchema.methods.awardXp = function(amount = 0) {
   if (amount > 0) {
     this.totalXp += amount
     this.xp += amount
+    
+    // Handle weekly XP reset
+    const now = new Date()
+    if (!this.lastWeeklyXpReset) {
+      this.weeklyXp = 0
+    } else {
+      const currentWeek = getWeekIdentifier(now)
+      const lastResetWeek = getWeekIdentifier(this.lastWeeklyXpReset)
+      if (currentWeek !== lastResetWeek) {
+        this.weeklyXp = 0
+      }
+    }
+    this.weeklyXp += amount
+    this.lastWeeklyXpReset = now
   }
   
   while (this.level < 100) {

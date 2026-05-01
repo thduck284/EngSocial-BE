@@ -406,6 +406,16 @@ export const getUserSkillStats = async (userId) => {
   return stats.map(s => new UserSkillStatsDTO(s))
 }
 
+// Helper to get week identifier (ISO 8601)
+const getWeekIdentifier = (d) => {
+  const date = new Date(d)
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() + 4 - (date.getDay() || 7))
+  const yearStart = new Date(date.getFullYear(), 0, 1)
+  const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7)
+  return `${date.getFullYear()}-W${weekNo}`
+}
+
 /**
  * Internal: update skill stats after lesson completion
  */
@@ -423,8 +433,19 @@ const updateSkillStats = async (userId, skill, { score, maxScore, xpEarned, time
       averageScore: 0,
       highestScore: 0,
       totalXpEarned: 0,
+      weeklyXpEarned: 0,
+      lastWeeklyXpReset: new Date(),
       skillLevel: 'A1',
     })
+  }
+
+  const now = new Date()
+  const currentWeek = getWeekIdentifier(now)
+  const lastResetWeek = stats.lastWeeklyXpReset ? getWeekIdentifier(stats.lastWeeklyXpReset) : null
+
+  if (currentWeek !== lastResetWeek) {
+    stats.weeklyTimeSpent = 0
+    stats.weeklyXpEarned = 0
   }
 
   // Body/API dùng giây (khớp UserLessonProgress.timeSpent); UserSkillStats lưu phút
@@ -434,12 +455,15 @@ const updateSkillStats = async (userId, skill, { score, maxScore, xpEarned, time
   stats.dailyTimeSpent += minutesToAdd
   stats.weeklyTimeSpent += minutesToAdd
   stats.totalXpEarned += xpEarned
+  stats.weeklyXpEarned = (stats.weeklyXpEarned || 0) + xpEarned
+  stats.lastWeeklyXpReset = now
+  
   const pct = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0
   stats.averageScore = Math.round(
     (stats.averageScore * (stats.lessonsCompleted - 1) + pct) / stats.lessonsCompleted,
   )
   if (pct > stats.highestScore) stats.highestScore = pct
-  stats.lastActivityAt = new Date()
+  stats.lastActivityAt = now
   await stats.save()
 }
 

@@ -162,6 +162,17 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
   }
 }
 
+// Helper to get week identifier (ISO 8601)
+const getWeekIdentifier = (d) => {
+  if (!d) return null
+  const date = new Date(d)
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() + 4 - (date.getDay() || 7))
+  const yearStart = new Date(date.getFullYear(), 0, 1)
+  const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7)
+  return `${date.getFullYear()}-W${weekNo}`
+}
+
 export const getMyStats = async (userId) => {
   const user = await User.findById(userId).select('level xp totalXp')
   if (!user) return null
@@ -177,10 +188,25 @@ export const getMyStats = async (userId) => {
   const skillDocs = await UserSkillStats.find({ userId }).lean()
   const weeklyXp = { reading: 0, listening: 0, writing: 0 }
   const skillStats = []
+  
+  const now = new Date()
+  const currentWeek = getWeekIdentifier(now)
+
   for (const doc of skillDocs || []) {
     const totalXp = Number(doc.totalXpEarned) || 0
+    
+    let weeklyXpEarned = Number(doc.weeklyXpEarned) || 0
+    let weeklyTimeSpent = Number(doc.weeklyTimeSpent) || 0
+    const lastResetWeek = getWeekIdentifier(doc.lastWeeklyXpReset)
+    
+    if (currentWeek !== lastResetWeek) {
+      weeklyXpEarned = 0
+      weeklyTimeSpent = 0
+    }
+    
     const percent = Math.min(100, Math.round(totalXp / 50))
-    weeklyXp[doc.skill] = totalXp
+    weeklyXp[doc.skill] = weeklyXpEarned
+    
     skillStats.push({
       key: doc.skill,
       labelKey: `skills.${doc.skill}`,
@@ -189,7 +215,7 @@ export const getMyStats = async (userId) => {
       percent,
       totalXpEarned: totalXp,
       totalTimeSpent: Number(doc.totalTimeSpent) || 0,
-      weeklyTimeSpent: Number(doc.weeklyTimeSpent) || 0,
+      weeklyTimeSpent: weeklyTimeSpent,
       dailyTimeSpent: Number(doc.dailyTimeSpent) || 0,
       lessonsCompleted: Number(doc.lessonsCompleted) || 0,
       lessonsInProgress: Number(doc.lessonsInProgress) || 0,

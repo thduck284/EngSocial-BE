@@ -106,6 +106,8 @@ export class UserLessonProgressDTO extends BaseDTO {
       startedAt: progress.startedAt,
       completedAt: progress.completedAt,
       lastAccessedAt: progress.lastAccessedAt,
+      submission: progress.submission,
+      attemptHistory: progress.attemptHistory,
       createdAt: progress.createdAt,
       updatedAt: progress.updatedAt,
     })

@@ -2,6 +2,7 @@ import * as authService from '../services/auth.service.js'
 import * as userService from '../services/user.service.js'
 import * as uploadService from '../services/upload.service.js'
 import * as achievementService from '../services/achievement.service.js'
+import { checkAndUnlockAchievements } from '../services/achievementUnlock.service.js'
 import { sendSuccess, sendError } from '../dto/index.js'
 import { emitToUser } from '../config/socket.js'
 
@@ -52,13 +53,51 @@ export const updateProfile = async (req, res, next) => {
 /**
  * Get current user's achievements (all achievements with unlocked state)
  * GET /api/user/achievements
+ * Also auto-syncs any milestones earned since the last check.
  */
 export const getAchievements = async (req, res, next) => {
   try {
+    // Lightweight sync: unlock any newly earned milestones before returning
+    const io = req.app.get('io')
+    await checkAndUnlockAchievements(req.userId, { io }).catch((e) =>
+      console.warn('[achievement] getAchievements sync failed:', e?.message)
+    )
     const list = await achievementService.getAchievementsForUser(req.userId)
     return sendSuccess(res, {
       messageKey: 'user.achievementsFetched',
       data: { achievements: list },
+    }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * Sync achievement stats (e.g. vocabulary count from client local storage)
+ * PUT /api/user/achievement-stats/sync
+ */
+export const syncAchievementStats = async (req, res, next) => {
+  try {
+    const { vocabularyNotesCount, customWordsCount } = req.body
+    const { User } = await import('../models/index.js')
+    
+    const update = {}
+    if (vocabularyNotesCount != null) update['achievementStats.vocabularyNotesCount'] = Number(vocabularyNotesCount)
+    if (customWordsCount != null) update['achievementStats.customWordsCount'] = Number(customWordsCount)
+    
+    if (Object.keys(update).length > 0) {
+      await User.findByIdAndUpdate(req.userId, { $set: update })
+      
+      // After sync, check for unlocks
+      const io = req.app.get('io')
+      await checkAndUnlockAchievements(req.userId, { io }).catch((e) =>
+        console.warn('[achievement] sync stats unlock failed:', e?.message)
+      )
+    }
+
+    return sendSuccess(res, {
+      messageKey: 'user.statsSynced',
+      data: {}
     }, req)
   } catch (error) {
     next(error)

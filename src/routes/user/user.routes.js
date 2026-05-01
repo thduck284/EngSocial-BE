@@ -29,6 +29,7 @@ router.patch('/skills-profile', auth, validate(updateSkillProfileSchema), userCo
  * @access  Private
  */
 router.get('/achievements', auth, userController.getAchievements)
+router.put('/achievement-stats/sync', auth, userController.syncAchievementStats)
 
 /**
  * @route   GET /api/user/profile/:userId

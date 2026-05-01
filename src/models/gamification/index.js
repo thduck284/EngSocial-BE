@@ -1,7 +1,5 @@
 export { default as Achievement } from './Achievement.js'
 export { default as UserAchievement } from './UserAchievement.js'
-export { default as Quest } from './Quest.js'
-export { default as UserQuestProgress } from './UserQuestProgress.js'
 export { default as UserPeriodicQuest } from './UserPeriodicQuest.js'
 export { default as PeriodicQuestPool } from './PeriodicQuestPool.js'
 export { default as Challenge } from './Challenge.js'
