@@ -185,8 +185,10 @@ const updateWorld = async (io) => {
       let collided = false
       world.players.forEach((other, otherId) => {
           if (!other || !other.snake) return
+          // Disable self-collision: skip if this is the same player
+          if (otherId === userId) return 
+
           other.snake.forEach((seg, idx) => {
-              if (otherId === userId && idx < 30) return // Increased safety margin for tight turns
               const dx = head.x - seg.x
               const dy = head.y - seg.y
               if (dx*dx + dy*dy < 400) collided = true
@@ -220,13 +222,15 @@ const updateWorld = async (io) => {
 
       player.snake.unshift(head)
       
+      const boostBonus = player.isBoosting ? Math.floor(player.score * 0.2) + 5 : 0
+      const targetLen = 10 + player.score + boostBonus
+
       if (ateCorrect) {
         player.score += (10 + player.streak)
         player.streak += 1
         player.correctCount += 1
         if (player.streak > player.maxStreak) player.maxStreak = player.streak
         
-        const targetLen = 10 + Math.floor(player.score / 2)
         if (player.snake.length > targetLen) player.snake.pop()
 
         if (foodEaten) {
@@ -255,7 +259,6 @@ const updateWorld = async (io) => {
         generateFoodPool(false).catch(() => {})
       } else if (ateDropped) {
         player.score += (foodEaten.value || 2)
-        const targetLen = 10 + Math.floor(player.score / 2)
         if (player.snake.length > targetLen) player.snake.pop()
         if (foodEaten) replaceFoodItem(foodEaten.id)
       } else if (ateWrong) {
@@ -267,10 +270,9 @@ const updateWorld = async (io) => {
         }
         player.score -= penalty
         player.streak = 0
-        player.snake.pop()
         if (foodEaten) replaceFoodItem(foodEaten.id)
       } else {
-        player.snake.pop()
+        if (player.snake.length > targetLen) player.snake.pop()
       }
     })
 
