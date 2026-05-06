@@ -1,4 +1,5 @@
 import { User, Friendship, UserSkillStats } from '../models/index.js'
+import * as achievementService from './achievement.service.js'
 
 const SKILL_LEVEL_NUM = { A1: 1, A2: 2, B1: 3, B2: 4, C1: 5, C2: 6 }
 
@@ -67,10 +68,29 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
       f.userId.toString() === targetId ? f.friendId.toString() : f.userId.toString()
     )
   )
-  let mutualFriendsCount = 0
+  const mutualFriends = []
   currentFriendIds.forEach((id) => {
-    if (targetFriendIds.has(id)) mutualFriendsCount++
+    if (targetFriendIds.has(id)) {
+      mutualFriends.push(id)
+    }
   })
+  let mutualFriendsCount = mutualFriends.length
+
+  // Fetch mutual friend details (first 10)
+  const mutualFriendsList = []
+  if (mutualFriends.length > 0) {
+    const details = await User.find({ _id: { $in: mutualFriends.slice(0, 20) } })
+      .select('name avatar level')
+      .lean()
+    details.forEach(u => {
+      mutualFriendsList.push({
+        id: u._id.toString(),
+        name: u.name,
+        avatar: u.avatar,
+        level: u.level ?? 1
+      })
+    })
+  }
 
   // First 6 friends of target (for preview)
   const friendDocs = await Friendship.find({
@@ -136,6 +156,19 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
     }
   })
 
+  // Fetch target user's achievements and badges
+  const achievementsAll = await achievementService.getAchievementsForUser(targetId)
+  const earnedAchievements = (achievementsAll || []).filter(a => 
+    a.unlocked && (
+      (Array.isArray(a.earnedBadges) && a.earnedBadges.length > 0) ||
+      (a.badgeName && String(a.badgeName).trim()) ||
+      (a.badgeImage && String(a.badgeImage).trim()) ||
+      (a.badgeIcon && String(a.badgeIcon).trim()) ||
+      a.rewardType === 'badge' || 
+      a.rewardType === 'both'
+    )
+  )
+
   return {
     id: targetId,
     name: user.name,
@@ -157,7 +190,9 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
     friendsCount,
     mutualFriendsCount,
     friends,
+    mutualFriends: mutualFriendsList,
     skills,
+    achievements: earnedAchievements,
     profileSkills: user.profileSkills || { skills: {}, goals: [], activeView: 'bars', updatedAt: null },
   }
 }
