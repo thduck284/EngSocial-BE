@@ -1,7 +1,12 @@
 import mongoose from 'mongoose'
 import UserPeriodicQuest from '../models/gamification/UserPeriodicQuest.js'
 import PeriodicQuestPool from '../models/gamification/PeriodicQuestPool.js'
-import { User } from '../models/index.js'
+import {
+  User,
+  UserLessonProgress,
+  Friendship,
+  Post,
+} from '../models/index.js'
 
 /** Số slot cố định mỗi kỳ — random chọn bấy nhiêu mục từ PeriodicQuestPool. */
 export const PERIODIC_SLOT_COUNTS = { daily: 3, weekly: 5 }
@@ -174,6 +179,96 @@ async function ensureSlotsForPeriod(userId, periodType, now = new Date()) {
 }
 
 /**
+ * Sync currentCount from actual activity logs since the quest was created.
+ * This ensures progress is accurate even if real-time events were missed, 
+ * and also respects the "after quest creation" time check.
+ */
+async function syncPeriodicQuestProgress(quest) {
+  if (quest.completed) return quest
+
+  const startTime = quest.createdAt
+  const userId = quest.userId
+  const { category, skill, minScorePercent, effectiveTarget } = quest
+
+  let count = 0
+
+  try {
+    if (category === 'lesson' || category === 'practice' || category === 'all') {
+      const filter = {
+        userId,
+        status: 'completed',
+        completedAt: { $gte: startTime },
+      }
+      
+      const progressDocs = await UserLessonProgress.find(filter).populate('lessonId').lean()
+      
+      const filtered = progressDocs.filter(p => {
+        const lesson = p.lessonId
+        if (!lesson) return false
+        
+        // Skill filter
+        if (skill !== 'all' && lesson.skill !== skill) return false
+        
+        // Category filter
+        if (category === 'lesson' && lesson.category !== 'lesson') return false
+        if (category === 'practice' && lesson.category !== 'practice') return false
+        
+        // Score filter
+        if (minScorePercent > 0 && (p.progress || 0) < minScorePercent) return false
+        
+        return true
+      })
+      count = filtered.length
+    } else if (category === 'vocabulary_notes') {
+      const { default: UserVocabRecent } = await import('../models/learning/UserVocabRecent.js')
+      const doc = await UserVocabRecent.findOne({ user: userId }).lean()
+      if (doc && doc.items) {
+        count = doc.items.filter(item => item.visitedAt >= startTime).length
+      }
+    } else if (category === 'friends') {
+      count = await Friendship.countDocuments({
+        $or: [{ userId }, { friendId: userId }],
+        status: 'accepted',
+        acceptedAt: { $gte: startTime },
+      })
+    } else if (category === 'community_post') {
+      count = await Post.countDocuments({
+        authorId: userId,
+        createdAt: { $gte: startTime },
+      })
+    } else if (category === 'login_streak' || category === 'online_time') {
+      // These are hard to sync from history without fine-grained logs.
+      // We keep currentCount as-is for these engagement metrics.
+      return quest
+    }
+
+    if (count > quest.currentCount) {
+      const next = Math.min(effectiveTarget, count)
+      const willComplete = next >= effectiveTarget
+      
+      const updated = await UserPeriodicQuest.findByIdAndUpdate(
+        quest._id,
+        { $set: { currentCount: next, completed: willComplete } },
+        { new: true }
+      ).lean()
+      
+      if (willComplete && !quest.completed && (updated.xpReward ?? 0) > 0) {
+        const user = await User.findById(userId)
+        if (user) {
+          user.awardXp(updated.xpReward)
+          await user.save()
+        }
+      }
+      return updated || quest
+    }
+  } catch (err) {
+    console.error('[syncPeriodicQuest] error:', err)
+  }
+
+  return quest
+}
+
+/**
  * Đảm bảo đủ slot theo kỳ; xóa bản ghi kỳ cũ. Quest đã tạo cho user + periodKey giữ nguyên, không tạo lại.
  */
 export async function ensureUserPeriodicQuests(userId, now = new Date()) {
@@ -190,11 +285,17 @@ export async function ensureUserPeriodicQuests(userId, now = new Date()) {
       { periodType: 'daily', periodKey: dk },
       { periodType: 'weekly', periodKey: wk },
     ],
-  }).lean()
+  })
+
+  const syncedDocs = []
+  for (const doc of docs) {
+    const synced = await syncPeriodicQuestProgress(doc)
+    syncedDocs.push(synced)
+  }
 
   const typeOrder = { daily: 0, weekly: 1 }
-  docs.sort((a, b) => (typeOrder[a.periodType] ?? 9) - (typeOrder[b.periodType] ?? 9) || a.slotIndex - b.slotIndex)
-  return docs
+  syncedDocs.sort((a, b) => (typeOrder[a.periodType] ?? 9) - (typeOrder[b.periodType] ?? 9) || a.slotIndex - b.slotIndex)
+  return syncedDocs
 }
 
 /**
@@ -253,6 +354,7 @@ export async function incrementPeriodicQuestsForCategory(userId, category, delta
     completed: false,
     category,
     $or: periodOr,
+    createdAt: { $lte: now }, // Chỉ tính quest đã tồn tại trước/tại thời điểm event
   }
 
   const andClauses = []
@@ -283,19 +385,16 @@ export async function bumpPeriodicQuestsOnLessonEvent(userId, lessonSkill, score
 /** Sau khi user tạo/sửa note từ màn vocab. */
 export async function bumpPeriodicQuestsOnVocabularyNoteEvent(userId) {
   await incrementPeriodicQuestsForCategory(userId, 'vocabulary_notes', 1)
-  await incrementPeriodicQuestsForCategory(userId, 'all', 1)
 }
 
 /** Sau khi user đăng nhập (streak/login engagement). */
 export async function bumpPeriodicQuestsOnLoginStreakEvent(userId) {
   await incrementPeriodicQuestsForCategory(userId, 'login_streak', 1)
-  await incrementPeriodicQuestsForCategory(userId, 'all', 1)
 }
 
 /** Tick thời gian online (delta theo phút hoặc đơn vị hệ thống gọi). */
 export async function bumpPeriodicQuestsOnOnlineTimeEvent(userId, delta = 1) {
   await incrementPeriodicQuestsForCategory(userId, 'online_time', delta)
-  await incrementPeriodicQuestsForCategory(userId, 'all', delta)
 }
 
 export function serializePeriodicQuestForClient(doc) {

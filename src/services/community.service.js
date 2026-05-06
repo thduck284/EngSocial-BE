@@ -5,6 +5,7 @@ import { getPagination, getPaginationQuery } from '../utils/index.js'
 import * as notificationService from './notification.service.js'
 import { incrementPeriodicQuestsForCategory } from './userPeriodicQuest.service.js'
 import { emitToUser } from '../config/socket.js'
+import { checkAndThrowIfViolation } from './moderation.service.js'
 
 /** Extract unique hashtag strings from content (without #) */
 function extractHashtags(content) {
@@ -388,6 +389,12 @@ export const getPostDocument = async (postId, index) => {
  * content is stored as-is including @mention text (e.g. "Hello @John Doe"); mentions array holds user IDs for refs.
  */
 export const createPost = async (userId, data, io = null) => {
+  // ── Kiểm duyệt nội dung trước khi lưu ──────────────────────────────
+  if (data.content && String(data.content).trim()) {
+    await checkAndThrowIfViolation(data.content, { threshold: 70, block: true })
+  }
+  // ────────────────────────────────────────────────────────────────────
+
   const tags = Array.isArray(data.tags) && data.tags.length > 0
     ? data.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean)
     : extractHashtags(data.content)

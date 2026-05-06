@@ -83,6 +83,20 @@ export const createPost = async (req, res, next) => {
       data: { post },
     }, req)
   } catch (error) {
+    if (error.message === 'CONTENT_VIOLATION') {
+      const mod = error.moderationResult || {}
+      return sendError(res, {
+        statusCode: 422,
+        messageKey: 'community.contentViolation',
+        message: 'Nội dung bài viết vi phạm tiêu chuẩn cộng đồng.',
+        data: {
+          label:           mod.label           ?? 'Vi phạm',
+          violation_score: mod.violation_score  ?? 0,
+          confidence:      mod.confidence       ?? 0,
+          keywords:        mod.keywords         ?? [],
+        },
+      }, req)
+    }
     next(error)
   }
 }

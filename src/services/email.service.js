@@ -209,3 +209,62 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
     console.error('[email] Gửi thông báo đổi trạng thái tài khoản thất bại:', err.message)
   }
 }
+
+/**
+ * Gửi OTP xác minh đổi email hoặc xóa tài khoản.
+ */
+export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_change') {
+  let subject, intro
+  
+  if (type === 'delete_account') {
+    subject = lang === 'en' ? 'EngSocial — Confirm Account Deletion' : 'EngSocial — Xác nhận xóa tài khoản'
+    intro = lang === 'en'
+      ? `Your OTP code to permanently delete your account is:`
+      : `Mã OTP để xác nhận xóa vĩnh viễn tài khoản của bạn là:`
+  } else {
+    subject = lang === 'en' ? 'EngSocial — Verify Email Change' : 'EngSocial — Xác minh đổi Email'
+    intro = lang === 'en'
+      ? `Your OTP code to change your email address is:`
+      : `Mã OTP để xác nhận đổi email của bạn là:`
+  }
+  
+  const expiry = lang === 'en' ? 'This code expires in 10 minutes.' : 'Mã có hiệu lực trong 10 phút.'
+
+  if (!transporter) {
+    // eslint-disable-next-line no-console
+    console.log(`[email] OTP (log only) for ${toEmail}: ${otp}`)
+    return
+  }
+
+  await transporter.sendMail({
+    from: `"EngSocial" <${SMTP_FROM}>`,
+    to: toEmail,
+    subject,
+    text: `${intro} ${otp}\n${expiry}`,
+    html: `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:36px 16px 48px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 12px 40px rgba(79,70,229,0.12);border:1px solid #e2e8f0;">
+        <tr><td style="background:linear-gradient(135deg,#4f46e5 0%,#6366f1 45%,#7c3aed 100%);padding:28px 32px;">
+          <div style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.03em;">EngSocial</div>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <p style="margin:0 0 20px;font-size:16px;color:#334155;">${intro}</p>
+          <div style="text-align:center;margin:28px 0;">
+            <span style="display:inline-block;font-size:36px;font-weight:900;letter-spacing:0.2em;color:#4f46e5;background:#eef2ff;padding:16px 32px;border-radius:16px;border:2px solid #c7d2fe;">${otp}</span>
+          </div>
+          <p style="margin:0;font-size:13px;color:#64748b;text-align:center;">${expiry}</p>
+        </td></tr>
+        <tr><td style="padding:0 32px 24px;"><p style="margin:0;font-size:11px;color:#94a3b8;">© EngSocial</p></td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`.trim(),
+  })
+}
+

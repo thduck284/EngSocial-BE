@@ -303,3 +303,107 @@ export const resetPassword = async (req, res, next) => {
     next(error)
   }
 }
+
+/**
+ * Change password (authenticated)
+ * POST /api/user/change-password
+ */
+export const changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body
+    await authService.changePassword(req.userId, { currentPassword, newPassword })
+    return sendSuccess(res, { messageKey: 'user.passwordChanged' }, req)
+  } catch (error) {
+    if (error.message === 'WRONG_PASSWORD') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.wrongPassword' }, req)
+    }
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Request email change OTP
+ * POST /api/user/change-email/request
+ */
+export const requestEmailChange = async (req, res, next) => {
+  try {
+    const { newEmail } = req.body
+    const lang = req.language || 'vi'
+    await authService.requestEmailChangeOtp(req.userId, newEmail, lang)
+    return sendSuccess(res, { messageKey: 'user.emailOtpSent' }, req)
+  } catch (error) {
+    if (error.message === 'EMAIL_EXISTS') {
+      return sendError(res, { statusCode: 409, messageKey: 'auth.emailExists' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Confirm email change with OTP
+ * POST /api/user/change-email/confirm
+ */
+export const confirmEmailChange = async (req, res, next) => {
+  try {
+    const { otp } = req.body
+    const user = await authService.confirmEmailChange(req.userId, otp)
+    // Update stored user in response so FE can sync
+    return sendSuccess(res, { messageKey: 'user.emailChanged', data: { user } }, req)
+  } catch (error) {
+    if (error.message === 'OTP_INVALID') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.otpInvalid' }, req)
+    }
+    if (error.message === 'OTP_EXPIRED') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.otpExpired' }, req)
+    }
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Request account deletion OTP
+ * POST /api/user/delete-account/request
+ */
+export const requestDeleteAccount = async (req, res, next) => {
+  try {
+    const lang = req.language || 'vi'
+    await authService.requestDeleteAccountOtp(req.userId, lang)
+    return sendSuccess(res, { messageKey: 'user.deleteOtpSent' }, req)
+  } catch (error) {
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Confirm account deletion with OTP
+ * POST /api/user/delete-account/confirm
+ */
+export const confirmDeleteAccount = async (req, res, next) => {
+  try {
+    const { otp } = req.body
+    await authService.confirmDeleteAccount(req.userId, otp)
+    return sendSuccess(res, { messageKey: 'user.accountDeleted' }, req)
+  } catch (error) {
+    if (error.message === 'OTP_INVALID') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.otpInvalid' }, req)
+    }
+    if (error.message === 'OTP_EXPIRED') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.otpExpired' }, req)
+    }
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+

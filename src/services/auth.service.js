@@ -490,3 +490,124 @@ export const resetPassword = async ({ token, newPassword }) => {
 
   return { ok: true }
 }
+
+/**
+ * Change password (authenticated) — verifies current password first.
+ */
+export const changePassword = async (userId, { currentPassword, newPassword }) => {
+  const user = await User.findById(userId).select('+password')
+  if (!user) throw new Error('USER_NOT_FOUND')
+
+  const valid = await comparePassword(currentPassword, user.password)
+  if (!valid) throw new Error('WRONG_PASSWORD')
+
+  user.password = await hashPassword(newPassword)
+  await user.save()
+  return { ok: true }
+}
+
+// In-memory OTP store (TTL 10 minutes). For production, use Redis.
+const emailChangeOtps = new Map()
+
+/**
+ * Request email change — generates OTP and sends to new email.
+ */
+export const requestEmailChangeOtp = async (userId, newEmail, lang = 'vi') => {
+  const normalizedEmail = newEmail.trim().toLowerCase()
+
+  // Check if email already taken
+  const existing = await User.findOne({ email: normalizedEmail })
+  if (existing) throw new Error('EMAIL_EXISTS')
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString()
+  const expiresAt = Date.now() + 10 * 60 * 1000 // 10 min
+
+  emailChangeOtps.set(userId, { otp, newEmail: normalizedEmail, expiresAt })
+
+  // Send email
+  const { sendOtpEmail } = await import('./email.service.js')
+  try {
+    await sendOtpEmail(normalizedEmail, otp, lang)
+  } catch (_) {
+    // Log in dev, but don't block the response
+    console.log(`[email] OTP for ${normalizedEmail}: ${otp}`)
+  }
+
+  return { ok: true }
+}
+
+/**
+ * Confirm email change with OTP.
+ */
+export const confirmEmailChange = async (userId, otp) => {
+  const record = emailChangeOtps.get(userId)
+  if (!record) throw new Error('OTP_INVALID')
+  if (Date.now() > record.expiresAt) {
+    emailChangeOtps.delete(userId)
+    throw new Error('OTP_EXPIRED')
+  }
+  if (record.otp !== otp) throw new Error('OTP_INVALID')
+
+  const user = await User.findById(userId)
+  if (!user) throw new Error('USER_NOT_FOUND')
+
+  user.email = record.newEmail
+  await user.save()
+  emailChangeOtps.delete(userId)
+
+  try {
+    await indexUser({ id: user._id.toString(), name: user.name, email: user.email, updatedAt: user.updatedAt })
+  } catch (_) {}
+
+  return new UserDTO(user)
+}
+
+// In-memory OTP store for account deletion (TTL 10 minutes).
+const deleteAccountOtps = new Map()
+
+/**
+ * Request account deletion OTP — sends OTP to user's current email.
+ */
+export const requestDeleteAccountOtp = async (userId, lang = 'vi') => {
+  const user = await User.findById(userId)
+  if (!user) throw new Error('USER_NOT_FOUND')
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString()
+  const expiresAt = Date.now() + 10 * 60 * 1000 // 10 min
+
+  deleteAccountOtps.set(userId, { otp, expiresAt })
+
+  const { sendOtpEmail } = await import('./email.service.js')
+  try {
+    await sendOtpEmail(user.email, otp, lang, 'delete_account')
+  } catch (_) {
+    console.log(`[email] Delete OTP for ${user.email}: ${otp}`)
+  }
+
+  return { ok: true }
+}
+
+/**
+ * Confirm account deletion with OTP — deletes account and invalidates all tokens.
+ */
+export const confirmDeleteAccount = async (userId, otp) => {
+  const record = deleteAccountOtps.get(userId)
+  if (!record) throw new Error('OTP_INVALID')
+  if (Date.now() > record.expiresAt) {
+    deleteAccountOtps.delete(userId)
+    throw new Error('OTP_EXPIRED')
+  }
+  if (record.otp !== otp) throw new Error('OTP_INVALID')
+
+  deleteAccountOtps.delete(userId)
+
+  // Invalidate all refresh tokens
+  await RefreshToken.deleteMany({ userId })
+
+  // Hard delete the user
+  await User.findByIdAndDelete(userId)
+
+  return { ok: true }
+}
+
+
