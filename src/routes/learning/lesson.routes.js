@@ -6,6 +6,7 @@ const router = Router()
 
 router.get('/dashboard', lessonController.getDashboard)
 router.get('/my-progress', auth, lessonController.getMyProgress)
+router.get('/user-progress/:targetUserId', auth, requireModeratorOrAdmin, lessonController.getUserProgressByMod)
 router.get('/history', auth, lessonController.getMyProgress)
 router.get('/reading/:id/content', lessonController.getReadingContent)
 router.get('/listening/:id/content', lessonController.getListeningContent)

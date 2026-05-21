@@ -756,3 +756,24 @@ export const aiGradeWriting = async (req, res, next) => {
     next(error)
   }
 }
+
+/**
+ * Get a specific user's lesson progress (Mod/Admin)
+ * GET /api/lessons/user-progress/:targetUserId?skill=&status=&category=&page=&limit=
+ */
+export const getUserProgressByMod = async (req, res, next) => {
+  try {
+    const { targetUserId } = req.params
+    const { skill, status, category, page = 1, limit = 50 } = req.query
+    const result = await lessonService.getUserProgress(targetUserId, {
+      skill: skill || undefined,
+      status: status || undefined,
+      category: category || undefined,
+      page: parseInt(page, 10) || 1,
+      limit: Math.min(100, Math.max(1, parseInt(limit, 10) || 50)),
+    })
+    return sendPaginated(res, { data: result.progress, pagination: result.pagination }, req)
+  } catch (error) {
+    next(error)
+  }
+}
