@@ -173,7 +173,7 @@ export const pipeChatStream = async (userId, body, res) => {
   const skillUsed = skill || conversation.skill
 
   res.status(200)
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
   res.setHeader('Cache-Control', 'no-cache, no-transform')
   res.setHeader('Connection', 'keep-alive')
   res.setHeader('X-Accel-Buffering', 'no')
