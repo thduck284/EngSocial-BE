@@ -61,6 +61,12 @@ const postSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Post',
     },
+    moderation: {
+      violationScore: { type: Number, default: 0 },
+      level: { type: String, enum: ['low', 'medium', 'high', 'none'], default: 'none' },
+      label: String,
+      keywords: [String],
+    },
   },
   { timestamps: true }
 )

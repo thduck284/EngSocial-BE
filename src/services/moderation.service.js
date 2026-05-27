@@ -41,26 +41,53 @@ export async function moderateText(text) {
   }
 }
 
-/**
- * Kiểm tra xem nội dung có vi phạm không.
- * Ném lỗi CONTENT_VIOLATION nếu bị phát hiện vi phạm.
- * @param {string} text
- * @param {{ threshold?: number, block?: boolean }} options
- *   - threshold: ngưỡng violation_score để chặn (mặc định 70)
- *   - block: true = ném lỗi chặn bài; false = chỉ gắn nhãn (mặc định true)
- */
-export async function checkAndThrowIfViolation(text, { threshold = 70, block = true } = {}) {
+export async function checkAndThrowIfViolation(text, { threshold = 50 } = {}) {
   const result = await moderateText(text)
-  if (!result) return { checked: false, result: null }
 
-  const violated =
-    result.is_violation === true && (result.violation_score ?? 0) >= threshold
-
-  if (violated && block) {
-    const err = new Error('CONTENT_VIOLATION')
-    err.moderationResult = result
+  // Fail-closed: nếu API không khả dụng, chặn bài để an toàn
+  if (!result) {
+    const err = new Error('MODERATION_UNAVAILABLE')
+    err.moderationResult = {
+      violationScore: 0,
+      level: 'none',
+      label: 'Không thể kiểm duyệt nội dung. Vui lòng thử lại sau.',
+      keywords: [],
+    }
     throw err
   }
 
-  return { checked: true, violated, result }
+  const aiKeywords = result.keywords || []
+  let score = result.violation_score ?? 0
+  const isViol = result.is_violation || false
+
+  // Nếu AI trả về is_violation là true hoặc mảng keywords có chứa từ khóa vi phạm
+  // nhưng score bị trả về thấp (< threshold) do bộ lọc tự tin (confidence gate),
+  // ta sẽ lấy score tối thiểu là 85% để đảm bảo bài viết này bị chặn đúng theo nhận diện của AI.
+  if ((isViol || aiKeywords.length > 0) && score < threshold) {
+    score = 85
+  }
+
+  let level = 'low'
+  if (score >= 80) {
+    level = 'high'
+  } else if (score >= 50) {
+    level = 'medium'
+  }
+
+  const formattedResult = {
+    violationScore: score,
+    level,
+    label: result.label || (level !== 'low' ? 'Vi phạm tiêu chuẩn cộng đồng' : 'Không vi phạm'),
+    keywords: aiKeywords,
+    confidence: result.confidence ?? score,
+  }
+
+  // Chặn cả medium (score >= 50) và high (score >= 80)
+  if (level === 'high' || level === 'medium') {
+    const err = new Error('CONTENT_VIOLATION')
+    err.moderationResult = formattedResult
+    throw err
+  }
+
+  return { checked: true, violated: false, result: formattedResult }
 }

@@ -90,11 +90,18 @@ export const createPost = async (req, res, next) => {
         messageKey: 'community.contentViolation',
         message: 'Nội dung bài viết vi phạm tiêu chuẩn cộng đồng.',
         data: {
-          label:           mod.label           ?? 'Vi phạm',
-          violation_score: mod.violation_score  ?? 0,
-          confidence:      mod.confidence       ?? 0,
-          keywords:        mod.keywords         ?? [],
+          label:           mod.label        ?? 'Vi phạm',
+          violationScore:  mod.violationScore ?? 0,
+          confidence:      mod.confidence     ?? 0,
+          keywords:        mod.keywords      ?? [],
         },
+      }, req)
+    }
+    if (error.message === 'MODERATION_UNAVAILABLE') {
+      return sendError(res, {
+        statusCode: 503,
+        messageKey: 'community.moderationUnavailable',
+        message: 'Hệ thống kiểm duyệt nội dung đang tạm thời không khả dụng. Vui lòng thử lại sau.',
       }, req)
     }
     next(error)
@@ -115,6 +122,27 @@ export const updatePost = async (req, res, next) => {
     }
     if (error.message === 'FORBIDDEN') {
       return sendError(res, { statusCode: 403, messageKey: 'common.forbidden' }, req)
+    }
+    if (error.message === 'CONTENT_VIOLATION') {
+      const mod = error.moderationResult || {}
+      return sendError(res, {
+        statusCode: 422,
+        messageKey: 'community.contentViolation',
+        message: 'Nội dung bài viết vi phạm tiêu chuẩn cộng đồng.',
+        data: {
+          label:          mod.label         ?? 'Vi phạm',
+          violationScore: mod.violationScore ?? 0,
+          confidence:     mod.confidence     ?? 0,
+          keywords:       mod.keywords       ?? [],
+        },
+      }, req)
+    }
+    if (error.message === 'MODERATION_UNAVAILABLE') {
+      return sendError(res, {
+        statusCode: 503,
+        messageKey: 'community.moderationUnavailable',
+        message: 'Hệ thống kiểm duyệt nội dung đang tạm thời không khả dụng. Vui lòng thử lại sau.',
+      }, req)
     }
     next(error)
   }

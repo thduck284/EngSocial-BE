@@ -390,8 +390,12 @@ export const getPostDocument = async (postId, index) => {
  */
 export const createPost = async (userId, data, io = null) => {
   // ── Kiểm duyệt nội dung trước khi lưu ──────────────────────────────
+  let moderationResult = { violationScore: 0, level: 'none', label: 'Không vi phạm', keywords: [] }
   if (data.content && String(data.content).trim()) {
-    await checkAndThrowIfViolation(data.content, { threshold: 70, block: true })
+    const res = await checkAndThrowIfViolation(data.content)
+    if (res && res.result) {
+      moderationResult = res.result
+    }
   }
   // ────────────────────────────────────────────────────────────────────
 
@@ -416,6 +420,7 @@ export const createPost = async (userId, data, io = null) => {
     lessonId: data.lessonId,
     challengeId: data.challengeId,
     sharedPostId: data.sharedPostId || null,
+    moderation: moderationResult,
   })
 
   try {
@@ -458,7 +463,17 @@ export const updatePost = async (userId, postId, data, io = null) => {
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
   if (post.authorId.toString() !== userId) throw new Error('FORBIDDEN')
 
-  if (data.content !== undefined) post.content = data.content
+  if (data.content !== undefined) {
+    post.content = data.content
+    if (String(data.content).trim()) {
+      const res = await checkAndThrowIfViolation(data.content)
+      if (res && res.result) {
+        post.moderation = res.result
+      }
+    } else {
+      post.moderation = { violationScore: 0, level: 'none', label: 'Không vi phạm', keywords: [] }
+    }
+  }
   if (data.images !== undefined) post.images = data.images
   if (data.video !== undefined) {
     post.video = typeof data.video === 'string' && data.video.trim() ? data.video.trim() : null
