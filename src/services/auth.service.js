@@ -248,12 +248,11 @@ export const loginWithFacebook = async ({ accessToken }) => {
     const meRes = await fetch(meUrl.toString())
     const me = await meRes.json()
     const providerId = me?.id ? String(me.id) : ''
-    const email = me?.email ? String(me.email).trim().toLowerCase() : ''
+    const email = me?.email ? String(me.email).trim().toLowerCase() : `fb_${providerId}@engsocial.local`
     const name = me?.name || 'User'
     const picture = me?.picture?.data?.url
 
     if (!meRes.ok || !providerId) throw new Error('SOCIAL_TOKEN_INVALID')
-    if (!email) throw new Error('EMAIL_REQUIRED')
 
     let user = await User.findOne({
       $or: [{ provider: 'facebook', providerId }, { email }],
