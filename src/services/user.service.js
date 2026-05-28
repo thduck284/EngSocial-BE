@@ -1,4 +1,5 @@
 import { User, Friendship, UserSkillStats } from '../models/index.js'
+import * as achievementService from './achievement.service.js'
 
 const SKILL_LEVEL_NUM = { A1: 1, A2: 2, B1: 3, B2: 4, C1: 5, C2: 6 }
 
@@ -67,10 +68,29 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
       f.userId.toString() === targetId ? f.friendId.toString() : f.userId.toString()
     )
   )
-  let mutualFriendsCount = 0
+  const mutualFriends = []
   currentFriendIds.forEach((id) => {
-    if (targetFriendIds.has(id)) mutualFriendsCount++
+    if (targetFriendIds.has(id)) {
+      mutualFriends.push(id)
+    }
   })
+  let mutualFriendsCount = mutualFriends.length
+
+  // Fetch mutual friend details (first 10)
+  const mutualFriendsList = []
+  if (mutualFriends.length > 0) {
+    const details = await User.find({ _id: { $in: mutualFriends.slice(0, 20) } })
+      .select('name avatar level')
+      .lean()
+    details.forEach(u => {
+      mutualFriendsList.push({
+        id: u._id.toString(),
+        name: u.name,
+        avatar: u.avatar,
+        level: u.level ?? 1
+      })
+    })
+  }
 
   // First 6 friends of target (for preview)
   const friendDocs = await Friendship.find({
@@ -136,6 +156,19 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
     }
   })
 
+  // Fetch target user's achievements and badges
+  const achievementsAll = await achievementService.getAchievementsForUser(targetId)
+  const earnedAchievements = (achievementsAll || []).filter(a => 
+    a.unlocked && (
+      (Array.isArray(a.earnedBadges) && a.earnedBadges.length > 0) ||
+      (a.badgeName && String(a.badgeName).trim()) ||
+      (a.badgeImage && String(a.badgeImage).trim()) ||
+      (a.badgeIcon && String(a.badgeIcon).trim()) ||
+      a.rewardType === 'badge' || 
+      a.rewardType === 'both'
+    )
+  )
+
   return {
     id: targetId,
     name: user.name,
@@ -157,9 +190,22 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
     friendsCount,
     mutualFriendsCount,
     friends,
+    mutualFriends: mutualFriendsList,
     skills,
+    achievements: earnedAchievements,
     profileSkills: user.profileSkills || { skills: {}, goals: [], activeView: 'bars', updatedAt: null },
   }
+}
+
+// Helper to get week identifier (ISO 8601)
+const getWeekIdentifier = (d) => {
+  if (!d) return null
+  const date = new Date(d)
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() + 4 - (date.getDay() || 7))
+  const yearStart = new Date(date.getFullYear(), 0, 1)
+  const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7)
+  return `${date.getFullYear()}-W${weekNo}`
 }
 
 export const getMyStats = async (userId) => {
@@ -177,10 +223,25 @@ export const getMyStats = async (userId) => {
   const skillDocs = await UserSkillStats.find({ userId }).lean()
   const weeklyXp = { reading: 0, listening: 0, writing: 0 }
   const skillStats = []
+  
+  const now = new Date()
+  const currentWeek = getWeekIdentifier(now)
+
   for (const doc of skillDocs || []) {
     const totalXp = Number(doc.totalXpEarned) || 0
+    
+    let weeklyXpEarned = Number(doc.weeklyXpEarned) || 0
+    let weeklyTimeSpent = Number(doc.weeklyTimeSpent) || 0
+    const lastResetWeek = getWeekIdentifier(doc.lastWeeklyXpReset)
+    
+    if (currentWeek !== lastResetWeek) {
+      weeklyXpEarned = 0
+      weeklyTimeSpent = 0
+    }
+    
     const percent = Math.min(100, Math.round(totalXp / 50))
-    weeklyXp[doc.skill] = totalXp
+    weeklyXp[doc.skill] = weeklyXpEarned
+    
     skillStats.push({
       key: doc.skill,
       labelKey: `skills.${doc.skill}`,
@@ -189,7 +250,7 @@ export const getMyStats = async (userId) => {
       percent,
       totalXpEarned: totalXp,
       totalTimeSpent: Number(doc.totalTimeSpent) || 0,
-      weeklyTimeSpent: Number(doc.weeklyTimeSpent) || 0,
+      weeklyTimeSpent: weeklyTimeSpent,
       dailyTimeSpent: Number(doc.dailyTimeSpent) || 0,
       lessonsCompleted: Number(doc.lessonsCompleted) || 0,
       lessonsInProgress: Number(doc.lessonsInProgress) || 0,

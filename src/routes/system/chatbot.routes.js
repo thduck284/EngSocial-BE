@@ -8,6 +8,7 @@ const router = Router()
 
 router.get('/conversations', auth, chatbotController.getConversations)
 router.get('/conversations/:conversationId/messages', auth, chatbotController.getMessages)
+router.post('/chat/stream', auth, validate(sendChatMessageSchema), chatbotController.sendMessageStream)
 router.post('/chat', auth, validate(sendChatMessageSchema), chatbotController.sendMessage)
 router.delete('/conversations/:conversationId', auth, chatbotController.deleteConversation)
 

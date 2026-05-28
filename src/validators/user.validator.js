@@ -71,3 +71,35 @@ export const updateSkillProfileSchema = Joi.object({
   activeView: Joi.string().valid('bars', 'radar').required(),
 })
 
+export const changePasswordSchema = Joi.object({
+  currentPassword: Joi.string().required().messages({
+    'any.required': 'Mật khẩu hiện tại là bắt buộc',
+  }),
+  newPassword: Joi.string().min(8).required().messages({
+    'string.min': 'Mật khẩu mới phải có ít nhất 8 ký tự',
+    'any.required': 'Mật khẩu mới là bắt buộc',
+  }),
+})
+
+export const requestEmailChangeSchema = Joi.object({
+  newEmail: Joi.string().email().required().messages({
+    'string.email': 'Email không hợp lệ',
+    'any.required': 'Email mới là bắt buộc',
+  }),
+})
+
+export const confirmEmailChangeSchema = Joi.object({
+  otp: Joi.string().length(6).required().messages({
+    'string.length': 'OTP phải gồm 6 ký tự',
+    'any.required': 'OTP là bắt buộc',
+  }),
+})
+
+export const confirmOtpSchema = Joi.object({
+  otp: Joi.string().length(6).required().messages({
+    'string.length': 'OTP phải gồm 6 ký tự',
+    'any.required': 'OTP là bắt buộc',
+  }),
+})
+
+

@@ -26,4 +26,7 @@ router.delete('/words/all', auth, requireModeratorOrAdmin, wordScrambleControlle
 router.patch('/words/:id', auth, requireModeratorOrAdmin, validate(updateWordScrambleSchema), wordScrambleController.updateWord)
 router.delete('/words/:id', auth, requireModeratorOrAdmin, wordScrambleController.deleteWord)
 
+/** Multiplayer Results */
+router.get('/results/:roomCode', auth, wordScrambleController.getGameResults)
+
 export default router

@@ -3,6 +3,9 @@ import { LessonDTO, LessonDetailDTO, UserLessonProgressDTO, UserSkillStatsDTO } 
 import { getPagination, getPaginationQuery } from '../utils/index.js'
 import { generateUniqueSlug } from '../utils/slug.js'
 import * as aiService from './ai.service.js'
+import * as mockTestService from './mockTest.service.js'
+import { bumpPeriodicQuestsOnLessonEvent } from './userPeriodicQuest.service.js'
+import { incrementChallengeProgressByRequirement } from './challenge.service.js'
 
 /**
  * Get all lessons with filters and pagination
@@ -125,7 +128,7 @@ export const startLesson = async (userId, lessonId) => {
 /**
  * Submit answers for a lesson
  */
-export const submitAnswers = async (userId, lessonId, { answers, timeSpent }) => {
+export const submitAnswers = async (userId, lessonId, { answers, timeSpent, isMockTest }) => {
   const lesson = await Lesson.findById(lessonId)
   if (!lesson) throw new Error('LESSON_NOT_FOUND')
 
@@ -136,6 +139,9 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent }) =>
       maxScore: lesson.questions.reduce((sum, q) => sum + (q.points || 10), 0),
     })
   }
+  
+  progress.isMockTest = !!isMockTest
+
 
   // Grade answers
   let score = 0
@@ -220,6 +226,23 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent }) =>
       xpEarned: xpEarnedThisAttempt,
       timeSpent: timeSpent || 0,
     })
+
+    try {
+      await bumpPeriodicQuestsOnLessonEvent(
+        userId,
+        lesson.skill || 'reading',
+        progressPercent,
+        lesson.category || 'lesson'
+      )
+    } catch (e) {
+      console.warn('[periodicQuest] lesson submit bump:', e?.message)
+    }
+    try {
+      await incrementChallengeProgressByRequirement(userId, 'lessons', 1)
+      await incrementChallengeProgressByRequirement(userId, 'score', progressPercent)
+    } catch (e) {
+      console.warn('[challenge] lesson submit bump:', e?.message)
+    }
   }
 
   progress.attemptHistory = progress.attemptHistory || []
@@ -242,7 +265,7 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent }) =>
 /**
  * Submit writing for a lesson
  */
-export const submitWriting = async (userId, lessonId, { content, wordCount, timeSpent = 0 }) => {
+export const submitWriting = async (userId, lessonId, { content, wordCount, timeSpent = 0, isMockTest }) => {
   const lesson = await Lesson.findById(lessonId)
   if (!lesson || lesson.skill !== 'writing') throw new Error('LESSON_NOT_FOUND')
 
@@ -252,6 +275,8 @@ export const submitWriting = async (userId, lessonId, { content, wordCount, time
       userId, lessonId, status: 'in_progress', startedAt: new Date(),
     })
   }
+  
+  progress.isMockTest = !!isMockTest
 
   progress.submission = {
     content,
@@ -305,7 +330,7 @@ export const submitWriting = async (userId, lessonId, { content, wordCount, time
  * Get user progress for all lessons (or filter by skill)
  */
 export const getUserProgress = async (userId, { skill, status, category, page = 1, limit = 10 }) => {
-  const filter = { userId }
+  const filter = { userId, isMockTest: { $ne: true } }
   if (status) filter.status = status
 
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
@@ -381,6 +406,16 @@ export const getUserSkillStats = async (userId) => {
   return stats.map(s => new UserSkillStatsDTO(s))
 }
 
+// Helper to get week identifier (ISO 8601)
+const getWeekIdentifier = (d) => {
+  const date = new Date(d)
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() + 4 - (date.getDay() || 7))
+  const yearStart = new Date(date.getFullYear(), 0, 1)
+  const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7)
+  return `${date.getFullYear()}-W${weekNo}`
+}
+
 /**
  * Internal: update skill stats after lesson completion
  */
@@ -398,8 +433,19 @@ const updateSkillStats = async (userId, skill, { score, maxScore, xpEarned, time
       averageScore: 0,
       highestScore: 0,
       totalXpEarned: 0,
+      weeklyXpEarned: 0,
+      lastWeeklyXpReset: new Date(),
       skillLevel: 'A1',
     })
+  }
+
+  const now = new Date()
+  const currentWeek = getWeekIdentifier(now)
+  const lastResetWeek = stats.lastWeeklyXpReset ? getWeekIdentifier(stats.lastWeeklyXpReset) : null
+
+  if (currentWeek !== lastResetWeek) {
+    stats.weeklyTimeSpent = 0
+    stats.weeklyXpEarned = 0
   }
 
   // Body/API dùng giây (khớp UserLessonProgress.timeSpent); UserSkillStats lưu phút
@@ -409,12 +455,15 @@ const updateSkillStats = async (userId, skill, { score, maxScore, xpEarned, time
   stats.dailyTimeSpent += minutesToAdd
   stats.weeklyTimeSpent += minutesToAdd
   stats.totalXpEarned += xpEarned
+  stats.weeklyXpEarned = (stats.weeklyXpEarned || 0) + xpEarned
+  stats.lastWeeklyXpReset = now
+  
   const pct = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0
   stats.averageScore = Math.round(
     (stats.averageScore * (stats.lessonsCompleted - 1) + pct) / stats.lessonsCompleted,
   )
   if (pct > stats.highestScore) stats.highestScore = pct
-  stats.lastActivityAt = new Date()
+  stats.lastActivityAt = now
   await stats.save()
 }
 
@@ -493,6 +542,7 @@ export const addLessonReview = async (userId, lessonId, { rating, comment }) => 
 export const getAllLessonResults = async (lessonId, { page = 1, limit = 100 }) => {
   const filter = { 
     lessonId, 
+    isMockTest: { $ne: true },
     $or: [
       { status: 'completed' },
       { status: 'under_review' },
@@ -579,6 +629,7 @@ export const gradeUserWriting = async (lessonId, userId, { score, feedback }) =>
   const lesson = await Lesson.findById(lessonId)
   if (!lesson) throw new Error('LESSON_NOT_FOUND')
 
+
   // Update progress
   const progressPercent = Math.round((score / (lesson.maxScore || 100)) * 100)
   progress.status = 'completed'
@@ -629,6 +680,26 @@ export const gradeUserWriting = async (lessonId, userId, { score, feedback }) =>
     timeSpent: progress.timeSpent || 0
   })
 
+  // Update Mock Test session status if this part is graded
+  await mockTestService.updateSessionStatusIfCompleted(progress._id)
+
+  try {
+    await bumpPeriodicQuestsOnLessonEvent(
+      userId,
+      lesson.skill || 'writing',
+      progressPercent,
+      lesson.category || 'lesson'
+    )
+  } catch (e) {
+    console.warn('[periodicQuest] writing grade bump:', e?.message)
+  }
+  try {
+    await incrementChallengeProgressByRequirement(userId, 'lessons', 1)
+    await incrementChallengeProgressByRequirement(userId, 'score', progressPercent)
+  } catch (e) {
+    console.warn('[challenge] writing grade bump:', e?.message)
+  }
+
   return progress
 }
 /**
@@ -659,6 +730,7 @@ export const aiGradeWriting = async (lessonId, userId) => {
   progress.submission.aiStrengths = aiResult.strengths || []
   progress.submission.aiImprovements = aiResult.improvements || []
   progress.submission.aiGrammarErrors = aiResult.grammarErrors || []
+  progress.submission.aiBreakdown = aiResult.breakdown || null
 
   // Also update last attempt in history
   if (progress.attemptHistory.length > 0) {
@@ -668,6 +740,7 @@ export const aiGradeWriting = async (lessonId, userId) => {
     lastAttempt.submission.aiStrengths = aiResult.strengths || []
     lastAttempt.submission.aiImprovements = aiResult.improvements || []
     lastAttempt.submission.aiGrammarErrors = aiResult.grammarErrors || []
+    lastAttempt.submission.aiBreakdown = aiResult.breakdown || null
   }
 
   await progress.save()

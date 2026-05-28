@@ -39,6 +39,12 @@ const attemptHistorySchema = new mongoose.Schema({
       correction: String,
       explanation: String
     }],
+    aiBreakdown: {
+      taskResponse: Number,
+      coherence: Number,
+      lexical: Number,
+      grammar: Number
+    },
   },
 }, { _id: false })
 
@@ -76,6 +82,12 @@ const userLessonProgressSchema = new mongoose.Schema({
       correction: String,
       explanation: String
     }],
+    aiBreakdown: {
+      taskResponse: Number,
+      coherence: Number,
+      lexical: Number,
+      grammar: Number
+    },
   },
   score: { type: Number, default: 0 },
   maxScore: Number,
@@ -88,6 +100,7 @@ const userLessonProgressSchema = new mongoose.Schema({
   lastAccessedAt: Date,
   notes: [noteSchema],
   attemptHistory: [attemptHistorySchema],
+  isMockTest: { type: Boolean, default: false },
 }, { timestamps: true })
 
 userLessonProgressSchema.index({ userId: 1, lessonId: 1 }, { unique: true })

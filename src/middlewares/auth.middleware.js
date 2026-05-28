@@ -17,6 +17,27 @@ export const auth = async (req, res, next) => {
     const token = authHeader.substring(7)
     const decoded = verifyToken(token)
     req.userId = decoded.userId
+
+    const u = await User.findById(req.userId).select('status').lean()
+    if (!u) {
+      return sendError(res, {
+        statusCode: 401,
+        messageKey: 'auth.tokenInvalidOrExpired',
+      }, req)
+    }
+    if (u.status === 'banned') {
+      return sendError(res, {
+        statusCode: 403,
+        messageKey: 'auth.accountBanned',
+      }, req)
+    }
+    if (u.status === 'inactive') {
+      return sendError(res, {
+        statusCode: 403,
+        messageKey: 'auth.accountInactive',
+      }, req)
+    }
+
     next()
   } catch (error) {
     return sendError(res, {

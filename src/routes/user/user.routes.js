@@ -1,9 +1,10 @@
 import { Router } from 'express'
 import * as userController from '../../controllers/user.controller.js'
+import * as authController from '../../controllers/auth.controller.js'
 import { auth } from '../../middlewares/auth.middleware.js'
 import { validate } from '../../middlewares/validate.middleware.js'
 import { uploadAvatar as uploadAvatarMw } from '../../middlewares/upload.middleware.js'
-import { updateProfileSchema, updateSkillProfileSchema } from '../../validators/user.validator.js'
+import { updateProfileSchema, updateSkillProfileSchema, changePasswordSchema, requestEmailChangeSchema, confirmEmailChangeSchema, confirmOtpSchema } from '../../validators/user.validator.js'
 
 const router = Router()
 
@@ -29,6 +30,7 @@ router.patch('/skills-profile', auth, validate(updateSkillProfileSchema), userCo
  * @access  Private
  */
 router.get('/achievements', auth, userController.getAchievements)
+router.put('/achievement-stats/sync', auth, userController.syncAchievementStats)
 
 /**
  * @route   GET /api/user/profile/:userId
@@ -66,5 +68,40 @@ router.post('/avatar', auth, (req, res, next) => {
 
 router.post('/block/:userId', auth, userController.blockUser)
 router.delete('/block/:userId', auth, userController.unblockUser)
+
+/**
+ * @route   POST /api/user/change-password
+ * @desc    Change password (requires currentPassword + newPassword)
+ * @access  Private
+ */
+router.post('/change-password', auth, validate(changePasswordSchema), authController.changePassword)
+
+/**
+ * @route   POST /api/user/change-email/request
+ * @desc    Request OTP to change email (sends OTP to newEmail)
+ * @access  Private
+ */
+router.post('/change-email/request', auth, validate(requestEmailChangeSchema), authController.requestEmailChange)
+
+/**
+ * @route   POST /api/user/change-email/confirm
+ * @desc    Confirm email change with OTP
+ * @access  Private
+ */
+router.post('/change-email/confirm', auth, validate(confirmEmailChangeSchema), authController.confirmEmailChange)
+
+/**
+ * @route   POST /api/user/delete-account/request
+ * @desc    Send OTP to user email to confirm account deletion
+ * @access  Private
+ */
+router.post('/delete-account/request', auth, authController.requestDeleteAccount)
+
+/**
+ * @route   POST /api/user/delete-account/confirm
+ * @desc    Confirm account deletion with OTP (deletes account permanently)
+ * @access  Private
+ */
+router.post('/delete-account/confirm', auth, validate(confirmOtpSchema), authController.confirmDeleteAccount)
 
 export default router

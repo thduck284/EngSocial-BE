@@ -5,6 +5,7 @@ import * as lessonService from '../services/lesson.service.js'
 import { LessonDTO, LessonDetailDTO } from '../dto/learning/response/lesson.response.js'
 import { sendSuccess, sendPaginated, sendError } from '../dto/index.js'
 import { generateUniqueSlug } from '../utils/slug.js'
+import { checkAndUnlockAchievements } from '../services/achievementUnlock.service.js'
 
 /**
  * Get lessons list with optional filters and pagination
@@ -97,11 +98,12 @@ export const getMyProgress = async (req, res, next) => {
  */
 export const getDashboard = async (req, res, next) => {
   try {
-    const featuredLessons = await Lesson.find({ status: 'published', featured: true })
-      .sort({ rating: -1, completionCount: -1 })
-      .limit(6)
-      .select('title slug skill level topic thumbnail estimatedTime xpReward rating')
+    const featuredLessons = await Lesson.find({ status: 'published' })
+      .sort({ completionCount: -1, rating: -1 })
+      .limit(5)
+      .select('title slug skill level topic thumbnail estimatedTime xpReward rating category completionCount')
       .lean()
+
     const data = {
       skillStats: [],
       featuredLessons: featuredLessons.map((l) => new LessonDTO(l).toJSON()),
@@ -521,7 +523,7 @@ export const completeLesson = async (req, res, next) => {
   try {
     const { id } = req.params
     const filter = mongoose.isValidObjectId(id) ? { _id: id } : { slug: id }
-    const lesson = await Lesson.findOne(filter).select('_id xpReward').lean()
+    const lesson = await Lesson.findOne(filter).select('_id xpReward skill category').lean()
     if (!lesson) {
       return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
     }
@@ -579,13 +581,13 @@ export const completeLesson = async (req, res, next) => {
 export const submitLessonAnswers = async (req, res, next) => {
   try {
     const { id } = req.params
-    const { answers = [], timeSpent = 0 } = req.body || {}
+    const { answers = [], timeSpent = 0, isMockTest = false } = req.body || {}
     const filter = mongoose.isValidObjectId(id) ? { _id: id } : { slug: id }
     const lesson = await Lesson.findOne(filter).select('_id').lean()
     if (!lesson) {
       return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
     }
-    const progress = await lessonService.submitAnswers(req.userId, lesson._id.toString(), { answers, timeSpent })
+    const progress = await lessonService.submitAnswers(req.userId, lesson._id.toString(), { answers, timeSpent, isMockTest })
     const latest = await UserLessonProgress.findOne({
       userId: req.userId,
       lessonId: lesson._id,
@@ -596,6 +598,11 @@ export const submitLessonAnswers = async (req, res, next) => {
       xpEarnedThisAttempt: lastAttempt?.xpEarned ?? 0,
       rewardEligible: (lastAttempt?.progress ?? 0) >= 80,
     }
+    // Fire-and-forget achievement check
+    const io = req.app.get('io')
+    checkAndUnlockAchievements(req.userId, { io }).catch((e) =>
+      console.warn('[achievement] submitLessonAnswers check failed:', e?.message)
+    )
     return sendSuccess(res, { data }, req)
   } catch (error) {
     next(error)
@@ -610,7 +617,7 @@ export const submitLessonAnswers = async (req, res, next) => {
 export const submitWritingLesson = async (req, res, next) => {
   try {
     const { id } = req.params
-    const { content = '', wordCount, timeSpent = 0 } = req.body || {}
+    const { content = '', wordCount, timeSpent = 0, isMockTest = false } = req.body || {}
     const filter = mongoose.isValidObjectId(id) ? { _id: id } : { slug: id }
     const lesson = await Lesson.findOne(filter).select('_id').lean()
     if (!lesson) {
@@ -620,7 +627,13 @@ export const submitWritingLesson = async (req, res, next) => {
       content,
       wordCount,
       timeSpent,
+      isMockTest
     })
+    // Fire-and-forget achievement check
+    const io = req.app.get('io')
+    checkAndUnlockAchievements(req.userId, { io }).catch((e) =>
+      console.warn('[achievement] submitWritingLesson check failed:', e?.message)
+    )
     return sendSuccess(res, { data: progress }, req)
   } catch (error) {
     next(error)
@@ -708,6 +721,11 @@ export const gradeUserWriting = async (req, res, next) => {
     }
 
     const result = await lessonService.gradeUserWriting(id, userId, { score, feedback })
+    // Fire-and-forget achievement check for the student who got graded
+    const io = req.app.get('io')
+    checkAndUnlockAchievements(userId, { io }).catch((e) =>
+      console.warn('[achievement] gradeUserWriting check failed:', e?.message)
+    )
     return sendSuccess(res, {
       message: 'Graded successfully',
       data: result,
@@ -734,6 +752,27 @@ export const aiGradeWriting = async (req, res, next) => {
       message: 'AI grading completed',
       data: result,
     }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * Get a specific user's lesson progress (Mod/Admin)
+ * GET /api/lessons/user-progress/:targetUserId?skill=&status=&category=&page=&limit=
+ */
+export const getUserProgressByMod = async (req, res, next) => {
+  try {
+    const { targetUserId } = req.params
+    const { skill, status, category, page = 1, limit = 50 } = req.query
+    const result = await lessonService.getUserProgress(targetUserId, {
+      skill: skill || undefined,
+      status: status || undefined,
+      category: category || undefined,
+      page: parseInt(page, 10) || 1,
+      limit: Math.min(100, Math.max(1, parseInt(limit, 10) || 50)),
+    })
+    return sendPaginated(res, { data: result.progress, pagination: result.pagination }, req)
   } catch (error) {
     next(error)
   }

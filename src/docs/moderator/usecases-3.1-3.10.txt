@@ -1,0 +1,452 @@
+================================================================================
+  MODERATOR — USE CASE THEO CHỨC NĂNG (1 UC = 1 chức năng)
+  Đánh số: UC-3.1 … UC-3.27 (file tên cũ giữ nguyên; nội dung đã mở rộng)
+================================================================================
+
+
+================================================================================
+  UC-3.1 — Tra cứu danh sách bài học
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.1 |
+| Tên Use Case     | Tra cứu danh sách bài học |
+| Mô tả            | Moderator lấy và xem danh sách bài học; lọc theo kỹ năng, cấp độ, chủ đề; tìm theo từ khóa; sắp xếp và phân trang. Không bao gồm tạo/sửa/xóa bài. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã đăng nhập với quyền moderator. |
+| Hậu điều kiện    | Danh sách hiển thị khớp dữ liệu máy chủ tại thời điểm tra cứu. |
+| Luồng cơ bản     | 1.Moderator yêu cầu tra cứu danh sách bài học (kèm điều kiện chỉ lấy loại bài học, không gồm bài luyện). |
+|                  | 2.Hệ thống kiểm tra phiên và quyền moderator. |
+|                  | 3.Hệ thống trả về danh sách hoặc thông báo lỗi. |
+|                  | 4.Moderator xem bảng kết quả; có thể đổi bộ lọc, từ khóa, chiều sắp xếp, trang (phần lớn xử lý trên dữ liệu đã tải theo triển khai hiện tại). |
+| Luồng thay thế   | Không có. |
+| Luồng ngoại lệ   | (3a) Lỗi tải: thông báo lỗi; hết phiên thì xử lý theo luồng chung ứng dụng. |
+
+
+================================================================================
+  UC-3.2 — Xóa bài học
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.2 |
+| Tên Use Case     | Xóa bài học |
+| Mô tả            | Moderator xóa một bài học đã tồn tại khỏi hệ thống sau khi xác nhận. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | 1.Đã đăng nhập với quyền moderator. 2.Tồn tại bài học cần xóa. 3.Moderator đã xác định bài cần xóa (ví dụ sau khi tra cứu danh sách). |
+| Hậu điều kiện    | Bản ghi bài học không còn trên máy chủ nếu xóa thành công. |
+| Luồng cơ bản     | 1.Moderator chọn xóa một bài học và xác nhận trong hộp thoại. |
+|                  | 2.Hệ thống kiểm tra quyền moderator và điều kiện xóa. |
+|                  | 3.Hệ thống xóa bản ghi và trả kết quả. |
+|                  | 4.Hệ thống thông báo kết quả; giao diện cập nhật danh sách hoặc điều hướng phù hợp. |
+| Luồng thay thế   | Không có. |
+| Luồng ngoại lệ   | (3a) Xóa thất bại: báo lỗi; không xóa dữ liệu. |
+
+
+================================================================================
+  UC-3.3 — Tra cứu danh sách bài luyện kỹ năng
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.3 |
+| Tên Use Case     | Tra cứu danh sách bài luyện kỹ năng |
+| Mô tả            | Moderator lấy và xem danh sách bài luyện (practice); lọc, tìm, sắp xếp, phân trang. Không bao gồm tạo/sửa/xóa. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã đăng nhập với quyền moderator. |
+| Hậu điều kiện    | Danh sách bài luyện hiển thị khớp máy chủ tại thời điểm tra cứu. |
+| Luồng cơ bản     | 1.Moderator yêu cầu tra cứu danh sách bài với điều kiện chỉ loại bài luyện. |
+|                  | 2.Hệ thống kiểm tra phiên và quyền. |
+|                  | 3.Hệ thống trả về danh sách hoặc lỗi. |
+|                  | 4.Moderator xem kết quả; có thể lọc, tìm, sắp xếp, phân trang. |
+| Luồng thay thế   | Không có. |
+| Luồng ngoại lệ   | (3a) Lỗi tải hoặc hết phiên: xử lý tương tự UC-3.1. |
+
+
+================================================================================
+  UC-3.4 — Xóa bài luyện kỹ năng
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.4 |
+| Tên Use Case     | Xóa bài luyện kỹ năng |
+| Mô tả            | Moderator xóa một bài luyện đã tồn tại sau khi xác nhận. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | 1.Đã đăng nhập với quyền moderator. 2.Tồn tại bài luyện cần xóa. |
+| Hậu điều kiện    | Bản ghi bài luyện không còn nếu xóa thành công. |
+| Luồng cơ bản     | 1.Moderator chọn xóa và xác nhận. 2.Hệ thống kiểm tra quyền và xóa. 3.Trả kết quả; cập nhật giao diện. |
+| Luồng thay thế   | Không có. |
+| Luồng ngoại lệ   | Xóa thất bại: báo lỗi (tương tự UC-3.2). |
+
+
+================================================================================
+  UC-3.5 — Tạo mới bài học
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.5 |
+| Tên Use Case     | Tạo mới bài học |
+| Mô tả            | Moderator nhập đầy đủ thông tin và nội dung bài học mới, tuỳ chọn đính kèm ảnh đại diện hoặc học liệu, rồi lưu. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã đăng nhập với quyền moderator. |
+| Hậu điều kiện    | Bản ghi bài học mới tồn tại trên máy chủ nếu lưu thành công. |
+| Luồng cơ bản     | 1.Moderator mở chức năng tạo bài học mới. |
+|                  | 2.Hệ thống hiển thị form với giá trị mặc định loại bài học. |
+|                  | 3.Moderator nhập thông tin chung (tiêu đề, mô tả, cấp độ, chủ đề, thời lượng, XP thưởng, …) và nội dung bài (câu hỏi, đáp án, nghe/đọc/viết tuỳ loại). |
+|                  | 4.(Tuỳ chọn) Moderator tải ảnh hoặc tệp học liệu: hệ thống lưu tệp, trả đường dẫn/mã định danh để gán vào bài. |
+|                  | 5.Moderator bấm lưu; hệ thống kiểm tra phía client các trường bắt buộc cơ bản. |
+|                  | 6.Hệ thống gửi yêu cầu tạo mới; backend kiểm tra quyền, validate, ghi CSDL. |
+|                  | 7.Hệ thống thông báo thành công hoặc lỗi. |
+| Luồng thay thế   | (3a) Nhập nhanh từ vựng/câu hỏi hoặc dùng modal hỗ trợ (theo triển khai). |
+| Luồng ngoại lệ   | (4a) Tải tệp lỗi: báo lỗi; không gán được ảnh/học liệu. (6a) Dữ liệu không hợp lệ hoặc từ chối quyền: báo theo phản hồi máy chủ. |
+
+
+================================================================================
+  UC-3.6 — Cập nhật bài học
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.6 |
+| Tên Use Case     | Cập nhật bài học |
+| Mô tả            | Moderator sửa thông tin và nội dung một bài học đã có, tuỳ chọn đổi ảnh/học liệu, rồi lưu. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Tồn tại bài học cần sửa; moderator đã đăng nhập với quyền moderator. |
+| Hậu điều kiện    | Bản ghi bài học phản ánh dữ liệu mới trên máy chủ nếu lưu thành công. |
+| Luồng cơ bản     | 1.Moderator chọn sửa một bài học theo định danh. |
+|                  | 2.Hệ thống tải chi tiết bài từ máy chủ và hiển thị form. |
+|                  | 3.Moderator chỉnh các trường và nội dung; tuỳ chọn tải tệp mới như UC-3.5. |
+|                  | 4.Moderator lưu; hệ thống validate và gửi cập nhật; backend lưu và trả kết quả. |
+| Luồng thay thế   | (3a) Giống nhập nhanh/modal UC-3.5. |
+| Luồng ngoại lệ   | (2a) Không tải được chi tiết: báo lỗi hoặc form thiếu dữ liệu. (4a) Lỗi validate/tệp/quyền: báo lỗi. |
+
+
+================================================================================
+  UC-3.7 — Tạo mới bài luyện kỹ năng
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.7 |
+| Tên Use Case     | Tạo mới bài luyện kỹ năng |
+| Mô tả            | Giống UC-3.5 nhưng đối tượng là bài luyện (practice): form mặc định loại bài luyện. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã đăng nhập với quyền moderator. |
+| Hậu điều kiện    | Bản ghi bài luyện mới tồn tại nếu lưu thành công. |
+| Luồng cơ bản     | Các bước tương tự UC-3.5 với ngữ cảnh loại bài luyện. |
+| Luồng thay thế   | Tương tự UC-3.5. |
+| Luồng ngoại lệ   | Tương tự UC-3.5. |
+
+
+================================================================================
+  UC-3.8 — Cập nhật bài luyện kỹ năng
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.8 |
+| Tên Use Case     | Cập nhật bài luyện kỹ năng |
+| Mô tả            | Giống UC-3.6 nhưng đối tượng là bài luyện đã có. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Tồn tại bài luyện cần sửa; đã đăng nhập moderator. |
+| Hậu điều kiện    | Bản ghi bài luyện được cập nhật nếu lưu thành công. |
+| Luồng cơ bản     | Các bước tương tự UC-3.6 với ngữ cảnh bài luyện. |
+| Luồng thay thế   | Tương tự UC-3.6. |
+| Luồng ngoại lệ   | Tương tự UC-3.6. |
+
+
+================================================================================
+  UC-3.9 — Xem kết quả nộp bài theo từng bài học hoặc bài luyện
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.9 |
+| Tên Use Case     | Xem kết quả nộp bài theo từng bài học hoặc bài luyện |
+| Mô tả            | Moderator xem danh sách bài làm đã nộp của học viên cho một bài học hoặc một bài luyện; có thể xem thêm chi tiết đề bài khi cần. Không bao gồm nhập điểm chấm (thuộc UC-3.10). |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Có bài và dữ liệu nộp/tiến độ trên máy chủ; moderator đã xác định bài cần xem (định danh bài). |
+| Hậu điều kiện    | Moderator đã xem được dữ liệu kết quả hợp lệ hoặc biết lý do không xem được. |
+| Luồng cơ bản     | 1.Moderator yêu cầu xem kết quả theo một bài học hoặc bài luyện. |
+|                  | 2.Hệ thống kiểm tra quyền moderator. |
+|                  | 3.Hệ thống trả về danh sách học viên, điểm/trạng thái, bản nộp writing nếu có. |
+|                  | 4.(Tuỳ chọn) Moderator yêu cầu thêm chi tiết đề bài; hệ thống trả nội dung để đối chiếu. |
+| Luồng thay thế   | Không có. |
+| Luồng ngoại lệ   | (3a) Không tải được: danh sách trống hoặc báo lỗi. |
+
+
+================================================================================
+  UC-3.10 — Chấm điểm phần writing của học viên
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.10 |
+| Tên Use Case     | Chấm điểm phần writing của học viên |
+| Mô tả            | Moderator nhập (hoặc điều chỉnh) điểm và nhận xét cho bài writing đã nộp; có thể dùng gợi ý chấm tự động. Áp dụng khi chấm từ ngữ cảnh bài học, bài luyện hoặc từ kết quả thi thử (sau khi đã mở đúng bài nộp/phiên). |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã có bài nộp writing cần chấm; moderator có quyền chấm. |
+| Hậu điều kiện    | Điểm và nhận xét được máy chủ lưu nếu xác nhận thành công. |
+| Luồng cơ bản     | 1.Moderator mở form chấm cho một học viên và một bài nộp writing cụ thể. |
+|                  | 2.(Tuỳ chọn) Moderator yêu cầu gợi ý chấm tự động; hệ thống gọi dịch vụ phân tích và trả điểm/nhận xét gợi ý; form được điền sẵn để moderator duyệt sửa. |
+|                  | 3.Moderator nhập điểm và phản hồi cuối cùng, xác nhận chấm. |
+|                  | 4.Hệ thống kiểm tra quyền, lưu kết quả chấm, trả kết quả. |
+|                  | 5.Hệ thống cập nhật hiển thị danh sách kết quả hoặc trạng thái dòng tương ứng. |
+| Luồng thay thế   | Không có. |
+| Luồng ngoại lệ   | (4a) Lưu thất bại: giữ form, báo lỗi theo máy chủ. |
+
+
+================================================================================
+  UC-3.11 — Tra cứu kết quả thi thử
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.11 |
+| Tên Use Case     | Tra cứu kết quả thi thử |
+| Mô tả            | Moderator xem danh sách phiên thi thử hoặc kết quả theo tài khoản được chọn; mở xem chi tiết một phiên (câu trả lời, điểm từng phần). Không bao gồm chấm tay (thuộc UC-3.10 khi moderator chọn bài nộp cần chấm). |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã đăng nhập với quyền moderator; phiên làm việc còn hiệu lực. |
+| Hậu điều kiện    | Dữ liệu tra cứu đã hiển thị hoặc đã báo lỗi. |
+| Luồng cơ bản     | 1.Moderator yêu cầu danh sách phiên/kết quả thi thử (kèm tham số lọc theo triển khai). |
+|                  | 2.Hệ thống kiểm tra quyền moderator, trả dữ liệu hoặc lỗi. |
+|                  | 3.Moderator xem bảng tổng quan; có thể tìm/sắp xếp cục bộ nếu có. |
+|                  | 4.Moderator chọn một phiên để xem chi tiết; hệ thống trả cấu trúc bài, câu trả lời, điểm từng phần. |
+| Luồng thay thế   | Không có. |
+| Luồng ngoại lệ   | Lỗi tải hoặc không đủ quyền: thông báo theo phản hồi máy chủ hoặc luồng chung. |
+
+
+================================================================================
+  UC-3.12 — Tra cứu danh sách nhiệm vụ
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.12 |
+| Tên Use Case     | Tra cứu danh sách nhiệm vụ |
+| Mô tả            | Moderator xem danh sách nhiệm vụ (tiêu đề, loại, mục tiêu, phần thưởng, …). |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã đăng nhập với quyền moderator. |
+| Hậu điều kiện    | Danh sách hiển thị khớp máy chủ. |
+| Luồng cơ bản     | 1.Moderator yêu cầu danh sách nhiệm vụ. 2.Hệ thống kiểm tra quyền và trả dữ liệu. 3.Moderator xem danh sách. |
+| Luồng thay thế   | Không có. |
+| Luồng ngoại lệ   | Lỗi tải: báo lỗi. |
+
+
+================================================================================
+  UC-3.13 — Tạo mới nhiệm vụ
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.13 |
+| Tên Use Case     | Tạo mới nhiệm vụ |
+| Mô tả            | Moderator tạo một nhiệm vụ mới (tiêu đề, mô tả, loại lặp lại, mục tiêu, phần thưởng, …) và lưu. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã đăng nhập với quyền moderator. |
+| Hậu điều kiện    | Nhiệm vụ mới tồn tại trên máy chủ nếu lưu thành công. |
+| Luồng cơ bản     | 1.Moderator nhập dữ liệu nhiệm vụ trên form tạo mới. 2.Moderator lưu. 3.Hệ thống validate và gửi tạo mới; backend lưu. 4.Thông báo kết quả; cập nhật danh sách hoặc điều hướng. |
+| Luồng thay thế   | Không có. |
+| Luồng ngoại lệ   | Dữ liệu không hợp lệ: hiển thị lỗi trên form hoặc từ máy chủ. |
+
+
+================================================================================
+  UC-3.14 — Cập nhật nhiệm vụ
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.14 |
+| Tên Use Case     | Cập nhật nhiệm vụ |
+| Mô tả            | Moderator sửa một nhiệm vụ đã có và lưu. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Tồn tại nhiệm vụ cần sửa; đã đăng nhập moderator. |
+| Hậu điều kiện    | Nhiệm vụ được cập nhật trên máy chủ nếu thành công. |
+| Luồng cơ bản     | 1.Moderator chọn nhiệm vụ theo định danh. 2.Hệ thống tải chi tiết và hiển thị form. 3.Moderator sửa và lưu. 4.Backend lưu và trả kết quả. |
+| Luồng ngoại lệ   | Không tải được chi tiết: spinner hoặc form không đầy đủ. Lưu thất bại: báo lỗi. |
+
+
+================================================================================
+  UC-3.15 — Xóa nhiệm vụ
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.15 |
+| Tên Use Case     | Xóa nhiệm vụ |
+| Mô tả            | Moderator xóa một nhiệm vụ sau xác nhận (nếu giao diện có chức năng xóa). |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Tồn tại nhiệm vụ cần xóa. |
+| Hậu điều kiện    | Nhiệm vụ không còn nếu xóa thành công. |
+| Luồng cơ bản     | 1.Moderator xác nhận xóa. 2.Hệ thống gửi yêu cầu xóa; backend xử lý. 3.Cập nhật danh sách. |
+| Luồng ngoại lệ   | Xóa thất bại: báo lỗi. |
+
+
+================================================================================
+  UC-3.16 — Tra cứu danh sách thử thách
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.16 |
+| Tên Use Case     | Tra cứu danh sách thử thách |
+| Mô tả            | Moderator xem danh sách thử thách (tên, thời gian, điều kiện, trạng thái, …). |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã đăng nhập với quyền moderator. |
+| Hậu điều kiện    | Danh sách hiển thị khớp máy chủ. |
+| Luồng cơ bản     | 1.Moderator yêu cầu danh sách thử thách. 2.Hệ thống trả dữ liệu. 3.Moderator xem. |
+| Luồng ngoại lệ   | Lỗi tải: báo lỗi. |
+
+
+================================================================================
+  UC-3.17 — Tạo mới thử thách
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.17 |
+| Tên Use Case     | Tạo mới thử thách |
+| Mô tả            | Moderator tạo thử thách mới (tiêu đề, mô tả, mục tiêu, phần thưởng, thời hạn, …) và lưu. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã đăng nhập với quyền moderator. |
+| Hậu điều kiện    | Thử thách mới tồn tại nếu lưu thành công. |
+| Luồng cơ bản     | 1.Moderator nhập form tạo mới. 2.Validate client cơ bản. 3.Gửi tạo; backend kiểm tra quyền và lưu. 4.Thông báo; danh sách có thể làm mới. |
+| Luồng ngoại lệ   | Lưu thất bại: báo lỗi. |
+
+
+================================================================================
+  UC-3.18 — Cập nhật thử thách
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.18 |
+| Tên Use Case     | Cập nhật thử thách |
+| Mô tả            | Moderator sửa thử thách đã có và lưu. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Tồn tại thử thách cần sửa. |
+| Hậu điều kiện    | Bản ghi được cập nhật nếu thành công. |
+| Luồng cơ bản     | 1.Moderator chọn thử thách. 2.Tải chi tiết, hiển thị form. 3.Sửa và gửi cập nhật. 4.Backend lưu. |
+| Luồng ngoại lệ   | Lỗi tải hoặc lưu: báo lỗi; hết phiên xử lý theo luồng chung. |
+
+
+================================================================================
+  UC-3.19 — Xóa thử thách
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.19 |
+| Tên Use Case     | Xóa thử thách |
+| Mô tả            | Moderator xóa một thử thách sau xác nhận (nếu giao diện có chức năng xóa). |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Tồn tại thử thách cần xóa. |
+| Hậu điều kiện    | Thử thách không còn nếu xóa thành công. |
+| Luồng cơ bản     | Xác nhận → yêu cầu xóa → backend xử lý → cập nhật danh sách. |
+| Luồng ngoại lệ   | Xóa thất bại: báo lỗi. |
+
+
+================================================================================
+  UC-3.20 — Tra cứu từ vựng Word Scramble
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.20 |
+| Tên Use Case     | Tra cứu từ vựng Word Scramble |
+| Mô tả            | Moderator xem danh sách từ vựng dùng cho game xáo chữ; lọc theo độ khó, chủ đề (tuỳ triển khai). |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã đăng nhập với quyền moderator. |
+| Hậu điều kiện    | Danh sách từ hiển thị khớp máy chủ. |
+| Luồng cơ bản     | 1.Moderator yêu cầu danh sách từ vựng (quyền moderator). 2.Hệ thống trả danh sách. 3.Moderator xem và lọc (cục bộ hoặc gọi lại máy chủ tuỳ triển khai). |
+| Luồng ngoại lệ   | Lỗi tải: báo lỗi. |
+
+
+================================================================================
+  UC-3.21 — Thêm từ vựng Word Scramble
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.21 |
+| Tên Use Case     | Thêm từ vựng Word Scramble |
+| Mô tả            | Moderator thêm một dòng từ (từ, nghĩa, ví dụ, độ khó, chủ đề, …) và lưu. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã đăng nhập với quyền moderator. |
+| Hậu điều kiện    | Từ mới tồn tại trên máy chủ nếu thành công. |
+| Luồng cơ bản     | 1.Moderator nhập các trường bắt buộc và xác nhận thêm. 2.Hệ thống gửi tạo mới. 3.Làm mới danh sách tra cứu. |
+| Luồng ngoại lệ   | Dữ liệu không hợp lệ: báo lỗi. |
+
+
+================================================================================
+  UC-3.22 — Cập nhật từ vựng Word Scramble
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.22 |
+| Tên Use Case     | Cập nhật từ vựng Word Scramble |
+| Mô tả            | Moderator sửa một từ đã có trong kho game và lưu. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Tồn tại bản ghi từ cần sửa. |
+| Hậu điều kiện    | Bản ghi được cập nhật nếu thành công. |
+| Luồng cơ bản     | 1.Moderator chọn từ cần sửa. 2.Mở form sửa, thay đổi trường, lưu. 3.Hệ thống gửi cập nhật; cập nhật hiển thị. |
+| Luồng ngoại lệ   | Lưu thất bại: báo lỗi. |
+
+
+================================================================================
+  UC-3.23 — Xóa từ vựng Word Scramble
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.23 |
+| Tên Use Case     | Xóa từ vựng Word Scramble |
+| Mô tả            | Moderator xóa một hoặc nhiều từ (kể cả xóa toàn bộ nếu có) sau xác nhận. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Tồn tại từ cần xóa. |
+| Hậu điều kiện    | Dữ liệu trên máy chủ phản ánh thao tác xóa. |
+| Luồng cơ bản     | 1.Moderator xác nhận xóa. 2.Hệ thống gửi yêu cầu xóa. 3.Đồng bộ danh sách. |
+| Luồng ngoại lệ   | Xóa thất bại: báo lỗi. |
+
+
+================================================================================
+  UC-3.24 — Nhập khẩu từ vựng Word Scramble hàng loạt
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.24 |
+| Tên Use Case     | Nhập khẩu từ vựng Word Scramble hàng loạt |
+| Mô tả            | Moderator đưa dữ liệu theo định dạng quy định (ví dụ TSV); hệ thống nhập khẩu hàng loạt và báo cáo dòng thành công/lỗi. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã đăng nhập với quyền moderator; có tệp hoặc văn bản đúng định dạng. |
+| Hậu điều kiện    | Máy chủ cập nhật theo kết quả import; moderator biết số dòng thành công/lỗi. |
+| Luồng cơ bản     | 1.Moderator chọn tệp hoặc dán nội dung; hệ thống kiểm tra sơ bộ. 2.Gửi gói dữ liệu nhập khẩu. 3.Backend parse, báo cáo. 4.Hiển thị kết quả; tải lại danh sách tra cứu. |
+| Luồng thay thế   | Xuất dữ liệu ra tệp cục bộ, chỉnh sửa ngoài, rồi nhập lại qua cùng chức năng. |
+| Luồng ngoại lệ   | Nội dung không hợp lệ: báo lỗi đọc dữ liệu hoặc từ chối từ máy chủ. Lỗi mạng: thông báo; dữ liệu hiển thị giữ nguyên đến khi tải lại thành công. |
+
+
+================================================================================
+  UC-3.25 — Xem danh mục thành tựu (moderator)
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.25 |
+| Tên Use Case     | Xem danh mục thành tựu (moderator) |
+| Mô tả            | Moderator xem thành tựu theo nhóm danh mục, xem chi tiết một mục (mô tả, cách đạt, phần thưởng). Dữ liệu trạng thái mở khoá có thể lấy từ máy chủ; phần catalog có thể ghép cấu trúc cục bộ theo triển khai. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Đã đăng nhập với quyền moderator. |
+| Hậu điều kiện    | Moderator đã xem được thông tin danh mục/chi tiết theo yêu cầu. |
+| Luồng cơ bản     | 1.Moderator chọn danh mục và xem danh sách thành tựu. 2.Hệ thống tải dữ liệu liên quan từ máy chủ (nếu có) và hiển thị thẻ/biểu tượng. 3.Moderator chọn một thành tựu để xem chi tiết. |
+| Luồng thay thế   | Vào cùng nội dung từ luồng người học (layout khác) — vẫn là xem danh mục. |
+| Luồng ngoại lệ   | Không tải được từ máy chủ: dùng catalog mặc định cục bộ nếu có fallback. |
+
+
+================================================================================
+  UC-3.26 — Thêm mục thành tựu vào catalog (giao diện quản trị)
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.26 |
+| Tên Use Case     | Thêm mục thành tựu vào catalog (giao diện quản trị) |
+| Mô tả            | Moderator thêm một mục thành tựu qua modal (tên, mô tả cách đạt, loại phần thưởng, điểm, huy hiệu, liên kết tuỳ chọn). Ghi chú: theo triển khai hiện tại có thể chỉ cập nhật state cục bộ, không gọi API lưu catalog. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Moderator có quyền thao tác quản lý trên giao diện catalog. |
+| Hậu điều kiện    | Catalog trên giao diện có thêm mục mới (phạm vi hiển thị/state theo code). |
+| Luồng cơ bản     | 1.Moderator mở form thêm, nhập trường, xác nhận. 2.Hệ thống thêm mục vào danh sách hiển thị và đóng modal. |
+| Luồng ngoại lệ   | Không có (hoặc lỗi validate form nếu có kiểm tra client). |
+
+
+================================================================================
+  UC-3.27 — Sửa mục thành tựu trên catalog (giao diện quản trị)
+================================================================================
+| Thuộc tính       | Nội dung |
+|------------------|-----------------------------------------------------------------------------|
+| Mã Use Case      | UC-3.27 |
+| Tên Use Case     | Sửa mục thành tựu trên catalog (giao diện quản trị) |
+| Mô tả            | Moderator sửa một mục thành tựu đang hiển thị trên catalog và lưu; state catalog cục bộ cập nhật theo triển khai hiện tại. |
+| Đối tượng        | Moderator |
+| Tiền điều kiện   | Tồn tại mục thành tựu trên catalog cần sửa. |
+| Hậu điều kiện    | Mục trên giao diện phản ánh nội dung sau chỉnh sửa. |
+| Luồng cơ bản     | 1.Moderator chọn sửa. 2.Modal hiển thị dữ liệu cũ. 3.Moderator chỉnh và lưu. 4.Hệ thống cập nhật state danh mục. |
+| Luồng ngoại lệ   | Không có hoặc lỗi validate tương tự UC-3.26. |

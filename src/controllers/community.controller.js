@@ -71,12 +71,39 @@ export const createPost = async (req, res, next) => {
   try {
     const io = req.app.get('io')
     const post = await communityService.createPost(req.userId, req.body, io)
+
+    // Achievement sync (fire-and-forget)
+    import('../services/achievementUnlock.service.js').then(({ checkAndUnlockAchievements }) => {
+      checkAndUnlockAchievements(req.userId, { io }).catch(() => {})
+    })
+
     return sendSuccess(res, {
       statusCode: 201,
       messageKey: 'community.postCreated',
       data: { post },
     }, req)
   } catch (error) {
+    if (error.message === 'CONTENT_VIOLATION') {
+      const mod = error.moderationResult || {}
+      return sendError(res, {
+        statusCode: 422,
+        messageKey: 'community.contentViolation',
+        message: 'Nội dung bài viết vi phạm tiêu chuẩn cộng đồng.',
+        data: {
+          label:           mod.label        ?? 'Vi phạm',
+          violationScore:  mod.violationScore ?? 0,
+          confidence:      mod.confidence     ?? 0,
+          keywords:        mod.keywords      ?? [],
+        },
+      }, req)
+    }
+    if (error.message === 'MODERATION_UNAVAILABLE') {
+      return sendError(res, {
+        statusCode: 503,
+        messageKey: 'community.moderationUnavailable',
+        message: 'Hệ thống kiểm duyệt nội dung đang tạm thời không khả dụng. Vui lòng thử lại sau.',
+      }, req)
+    }
     next(error)
   }
 }
@@ -95,6 +122,27 @@ export const updatePost = async (req, res, next) => {
     }
     if (error.message === 'FORBIDDEN') {
       return sendError(res, { statusCode: 403, messageKey: 'common.forbidden' }, req)
+    }
+    if (error.message === 'CONTENT_VIOLATION') {
+      const mod = error.moderationResult || {}
+      return sendError(res, {
+        statusCode: 422,
+        messageKey: 'community.contentViolation',
+        message: 'Nội dung bài viết vi phạm tiêu chuẩn cộng đồng.',
+        data: {
+          label:          mod.label         ?? 'Vi phạm',
+          violationScore: mod.violationScore ?? 0,
+          confidence:     mod.confidence     ?? 0,
+          keywords:       mod.keywords       ?? [],
+        },
+      }, req)
+    }
+    if (error.message === 'MODERATION_UNAVAILABLE') {
+      return sendError(res, {
+        statusCode: 503,
+        messageKey: 'community.moderationUnavailable',
+        message: 'Hệ thống kiểm duyệt nội dung đang tạm thời không khả dụng. Vui lòng thử lại sau.',
+      }, req)
     }
     next(error)
   }
@@ -216,6 +264,12 @@ export const createComment = async (req, res, next) => {
   try {
     const io = req.app.get('io')
     const comment = await communityService.createComment(req.userId, req.params.postId, req.body, io)
+
+    // Achievement sync (fire-and-forget)
+    import('../services/achievementUnlock.service.js').then(({ checkAndUnlockAchievements }) => {
+      checkAndUnlockAchievements(req.userId, { io }).catch(() => {})
+    })
+
     return sendSuccess(res, {
       statusCode: 201,
       messageKey: 'community.commentCreated',

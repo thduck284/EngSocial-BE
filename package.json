@@ -16,6 +16,8 @@
     "db:seed:writing": "node database/seed-writing-lessons.js",
     "db:seed:quests": "node database/seed-quests-node.js",
     "db:seed:challenges": "node database/seed-challenges.js",
+    "db:seed:achievements-learning": "node database/seed-achievements-learning.js",
+    "db:seed:quest-pool": "node database/seed-periodic-quest-pool.js",
     "db:seed:all": "node database/seed.js"
   },
   "keywords": [

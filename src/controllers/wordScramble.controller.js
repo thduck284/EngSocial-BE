@@ -84,3 +84,17 @@ export const deleteAllWords = async (req, res, next) => {
     next(err)
   }
 }
+
+export const getGameResults = async (req, res, next) => {
+  try {
+    const { roomCode } = req.params
+    const { getGameResult } = await import('../sockets/wordScrambleGame.js')
+    const game = getGameResult(roomCode)
+    if (!game) {
+      return sendError(res, { statusCode: 404, message: 'Game results not found or expired.' }, req)
+    }
+    return sendSuccess(res, { data: { game } }, req)
+  } catch (err) {
+    next(err)
+  }
+}

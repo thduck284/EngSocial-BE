@@ -60,43 +60,104 @@ export const getMatchmakingProfile = async (userId, partySize) => {
 /**
  * Gọi AI Matchmaking để tìm nhóm phù hợp.
  * @param {string} hostId
- * @param {string[]} queueUserIds
+ * @param {any[]} queueEntities Danh sách các thực thể (Solo hoặc Group) đã có profile
  * @param {number} partySize
  */
-export const callMatchmakingAI = async (hostId, queueUserIds, partySize) => {
+export const callMatchmakingAI = async (hostId, queueEntities, partySize) => {
   const hostProfile = await getMatchmakingProfile(hostId, partySize)
   
-  const queueProfiles = await Promise.all(
-    queueUserIds.map(uid => getMatchmakingProfile(uid, partySize))
-  )
-
   const payload = {
     partySize,
     host: {
       ...hostProfile,
-      type: 'solo', // Mặc định là solo host
-    },
-    queue: queueProfiles.map(p => ({
-      ...p,
       type: 'solo',
+    },
+    queue: queueEntities.map(p => ({
+      ...p,
+      type: p.users?.length > 1 ? 'group' : 'solo',
     }))
   }
 
+  const rawUrl =
+    process.env.AI_MATCHMAKING_URL?.trim() ||
+    process.env.AI_MATCHMAKING_INTERNAL_URL?.trim()
+  if (!rawUrl) {
+    console.error(
+      'AI Matchmaking Error: set AI_MATCHMAKING_URL (or AI_MATCHMAKING_INTERNAL_URL) in .env',
+    )
+    throw new Error('AI_MATCHMAKING_FAILED')
+  }
+
+  /** Chuẩn hóa: cho phép chỉ ghi base https://xxx.ngrok-free.app (tự thêm /api/matchmake). */
+  const normalizeMatchmakingUrl = (u) => {
+    let s = String(u).trim().replace(/\s+/g, '')
+    if (!s) return ''
+    s = s.replace(/\/+$/, '')
+    if (/\/api\/matchmake$/i.test(s)) return s
+    return `${s}/api/matchmake`
+  }
+
+  const aiUrl = normalizeMatchmakingUrl(rawUrl)
+
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  }
+  // Ngrok free: HTML interstitial / edge 404 — gửi bundle header giống trình duyệt + skip warning.
+  if (/ngrok\.(app|io|dev)/i.test(aiUrl)) {
+    headers['ngrok-skip-browser-warning'] = '69420'
+    headers['User-Agent'] =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  }
+
   try {
-    const aiUrl = process.env.AI_MATCHMAKING_URL
     const response = await fetch(aiUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
     })
+    const rawText = await response.text()
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      console.error('AI Matchmaking Error:', errorData)
-      throw new Error('AI_MATCHMAKING_FAILED')
+      let errorData = {}
+      try {
+        errorData = rawText ? JSON.parse(rawText) : {}
+      } catch {
+        errorData = { raw: rawText.slice(0, 500) }
+      }
+      const isNgrokHtml =
+        typeof rawText === 'string' &&
+        (rawText.includes('assets.ngrok.com') || rawText.includes('ngrok-free.app'))
+      if (isNgrokHtml) {
+        console.error(
+          'AI Matchmaking (ngrok): tunnel có thể đã tắt hoặc AI_MATCHMAKING_URL sai subdomain.',
+          '→ Kiểm tra .env AI_MATCHMAKING_URL (hoặc AI_MATCHMAKING_INTERNAL_URL), tunnel/Render đang chạy, rồi restart npm.',
+          { requestedUrl: aiUrl, status: response.status },
+        )
+      } else {
+        console.error('AI Matchmaking Error:', response.status, response.statusText, errorData)
+      }
+      throw new Error(`AI_MATCHMAKING_HTTP_${response.status}`)
     }
-    return await response.json()
+    if (
+      typeof rawText === 'string' &&
+      rawText.trimStart().startsWith('<!') &&
+      (rawText.includes('assets.ngrok.com') || rawText.includes('ngrok'))
+    ) {
+      console.error(
+        'AI Matchmaking (ngrok): nhận HTML thay vì JSON (interstitial / tunnel lỗi). Kiểm tra URL + notebook đang chạy.',
+        { requestedUrl: aiUrl },
+      )
+      throw new Error('AI_MATCHMAKING_NGROK_HTML')
+    }
+    try {
+      return JSON.parse(rawText)
+    } catch (e) {
+      console.error('AI Matchmaking Error: response is not JSON', rawText.slice(0, 300))
+      throw new Error('AI_MATCHMAKING_INVALID_JSON')
+    }
   } catch (error) {
-    console.error('AI Matchmaking Connection Error:', error.message)
+    const msg = error?.cause?.message || error.message
+    console.error('AI Matchmaking Connection Error:', msg)
     throw new Error('AI_MATCHMAKING_FAILED')
   }
 }

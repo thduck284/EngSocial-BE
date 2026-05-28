@@ -14,6 +14,8 @@ const userAchievementSchema = new mongoose.Schema({
   unlockedAt: { type: Date, default: Date.now },
   progress: { type: Number, default: 0 },
   displayed: { type: Boolean, default: false },
+  /** Array of milestone `value` numbers that have already been unlocked */
+  unlockedMilestoneValues: { type: [Number], default: [] },
 })
 
 userAchievementSchema.index({ userId: 1, achievementId: 1 }, { unique: true })

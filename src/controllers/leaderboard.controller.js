@@ -4,7 +4,7 @@ import { sendSuccess } from '../dto/index.js'
 export const getLeaderboard = async (req, res, next) => {
   try {
     const { type, period } = req.query
-    const leaderboard = await leaderboardService.getLeaderboard({ type, period })
+    const leaderboard = await leaderboardService.getLeaderboard({ type, period, userId: req.userId })
     return sendSuccess(res, {
       messageKey: 'leaderboard.success',
       data: { leaderboard },

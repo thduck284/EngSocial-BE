@@ -2,8 +2,10 @@ import mongoose from 'mongoose'
 import { Friendship, User } from '../models/index.js'
 import { FriendshipDTO } from '../dto/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
+import { incrementPeriodicQuestsForCategory } from './userPeriodicQuest.service.js'
 import { isElasticsearchEnabled } from '../config/elasticsearch/client.js'
 import { searchUserIds } from '../config/elasticsearch/userSearch.service.js'
+import { isUserOnline } from '../config/socket.js'
 
 /**
  * Send friend request
@@ -48,6 +50,12 @@ export const acceptFriendRequest = async (userId, friendshipId) => {
   friendship.status = 'accepted'
   friendship.acceptedAt = new Date()
   await friendship.save()
+  try {
+    await incrementPeriodicQuestsForCategory(friendship.userId, 'friends', 1)
+    await incrementPeriodicQuestsForCategory(friendship.friendId, 'friends', 1)
+  } catch (e) {
+    console.warn('[periodicQuest] friends bump:', e?.message)
+  }
   return new FriendshipDTO(friendship)
 }
 
@@ -100,15 +108,17 @@ export const getFriends = async (userId, { page = 1, limit = 20 }) => {
 
   const friends = friendships.map(f => {
     const friendUser = f.userId._id.toString() === userId ? f.friendId : f.userId
+    const fid = friendUser._id.toString()
     return {
       friendshipId: f._id.toString(),
       user: {
-        id: friendUser._id.toString(),
+        id: fid,
         name: friendUser.name,
         avatar: friendUser.avatar,
         level: friendUser.level,
         totalXp: friendUser.totalXp,
         lastActiveDate: friendUser.lastActiveDate,
+        online: isUserOnline(fid), // REAL-TIME CHECK
       },
       acceptedAt: f.acceptedAt,
     }
@@ -265,6 +275,7 @@ export const searchUsersForFriends = async (currentUserId, { q = '', page = 1, l
           level: u.level,
           totalXp: u.totalXp,
           friendStatus,
+          online: isUserOnline(uid),
         }
         if (friendshipIdByFriendId[uid]) out.friendshipId = friendshipIdByFriendId[uid]
         if (friendStatus === 'pending' && pendingSentByMeByFriendId[uid] !== undefined) {
@@ -326,6 +337,7 @@ export const searchUsersForFriends = async (currentUserId, { q = '', page = 1, l
       level: u.level,
       totalXp: u.totalXp,
       friendStatus,
+      online: isUserOnline(uid),
     }
     if (friendshipIdByFriendId[uid]) out.friendshipId = friendshipIdByFriendId[uid]
     if (friendStatus === 'pending' && pendingSentByMeByFriendId[uid] !== undefined) {
@@ -338,4 +350,128 @@ export const searchUsersForFriends = async (currentUserId, { q = '', page = 1, l
     users: result,
     pagination: getPagination({ page, limit: perPage, total }),
   }
+}
+
+/**
+ * Get friend suggestions based on friends of friends (mutual connections).
+ * @param {string} userId - current user id
+ * @param {object} opts - { limit }
+ */
+export const getFriendSuggestions = async (currentUserId, { limit = 10 }) => {
+  const currentId = new mongoose.Types.ObjectId(currentUserId)
+
+  // 1. Get current user's friends
+  const myFriendships = await Friendship.find({
+    $or: [{ userId: currentId }, { friendId: currentId }],
+    status: 'accepted',
+  }).lean()
+
+  const myFriendIds = myFriendships.map(f =>
+    f.userId.toString() === currentUserId ? f.friendId : f.userId
+  )
+
+  // 2. Get all friendships of my friends (second degree)
+  // We exclude current user and my existing friends from the suggestion pool later.
+  const pipeline = [
+    {
+      $match: {
+        $or: [
+          { userId: { $in: myFriendIds } },
+          { friendId: { $in: myFriendIds } },
+        ],
+        status: 'accepted',
+      },
+    },
+    {
+      $project: {
+        // If userId is my friend, then friendId is the potential suggestion
+        // If friendId is my friend, then userId is the potential suggestion
+        potentialId: {
+          $cond: [
+            { $in: ['$userId', myFriendIds] },
+            '$friendId',
+            '$userId',
+          ],
+        },
+      },
+    },
+    {
+      $match: {
+        potentialId: {
+          $nin: [currentId, ...myFriendIds],
+        },
+      },
+    },
+    {
+      $group: {
+        _id: '$potentialId',
+        mutualCount: { $sum: 1 },
+      },
+    },
+    { $sort: { mutualCount: -1 } },
+    { $limit: Number(limit) * 3 }, // Get a few more to filter pending requests
+  ]
+
+  const rawSuggestions = await Friendship.aggregate(pipeline)
+
+  if (rawSuggestions.length === 0) {
+    // If no mutual friends found, fallback to random active users
+    const randomUsers = await User.find({
+      _id: { $nin: [currentId, ...myFriendIds] },
+      status: 'active',
+    })
+      .select('name avatar level totalXp')
+      .limit(Number(limit))
+      .lean()
+
+    return randomUsers.map(u => ({
+      id: u._id.toString(),
+      name: u.name,
+      avatar: u.avatar,
+      level: u.level,
+      totalXp: u.totalXp,
+      mutualFriendsCount: 0,
+      online: isUserOnline(u._id.toString()),
+    }))
+  }
+
+  // 3. Filter out users who have pending requests with me
+  const suggestionIds = rawSuggestions.map(s => s._id)
+  const pendingFriendships = await Friendship.find({
+    $or: [
+      { userId: currentId, friendId: { $in: suggestionIds } },
+      { friendId: currentId, userId: { $in: suggestionIds } },
+    ],
+    status: 'pending',
+  }).lean()
+
+  const pendingIds = new Set(pendingFriendships.map(f =>
+    f.userId.toString() === currentUserId ? f.friendId.toString() : f.userId.toString()
+  ))
+
+  const filteredSuggestions = rawSuggestions
+    .filter(s => !pendingIds.has(s._id.toString()))
+    .slice(0, Number(limit))
+
+  // 4. Populate user info
+  const finalUserIds = filteredSuggestions.map(s => s._id)
+  const users = await User.find({ _id: { $in: finalUserIds } })
+    .select('name avatar level totalXp')
+    .lean()
+
+  const userMap = new Map(users.map(u => [u._id.toString(), u]))
+
+  return filteredSuggestions.map(s => {
+    const u = userMap.get(s._id.toString())
+    if (!u) return null
+    return {
+      id: u._id.toString(),
+      name: u.name,
+      avatar: u.avatar,
+      level: u.level,
+      totalXp: u.totalXp,
+      mutualFriendsCount: s.mutualCount,
+      online: isUserOnline(u._id.toString()),
+    }
+  }).filter(Boolean)
 }

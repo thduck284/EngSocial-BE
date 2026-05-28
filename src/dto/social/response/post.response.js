@@ -134,6 +134,7 @@ export class PostDTO extends BaseDTO {
       tags: post.tags,
       mentions: mapMentions(post.mentions, post.mentionSnapshots),
       sharedPostId: post.sharedPostId?.toString(),
+      moderation: post.moderation || null,
       createdAt: post.createdAt,
       updatedAt: post.updatedAt,
     })
@@ -167,6 +168,7 @@ export class PostDetailDTO extends BaseDTO {
             post.sharedPostId.authorId || post.sharedPostId.author
           )
         : null,
+      moderation: post.moderation || null,
       createdAt: post.createdAt,
       updatedAt: post.updatedAt,
     })

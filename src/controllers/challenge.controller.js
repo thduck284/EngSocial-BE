@@ -73,8 +73,11 @@ export const updateProgress = async (req, res, next) => {
       data: { participant },
     }, req)
   } catch (error) {
-    if (error.message === 'NOT_JOINED') {
-      return sendError(res, { statusCode: 404, messageKey: 'challenge.notJoined' }, req)
+    if (error.message === 'CHALLENGE_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'challenge.notFound' }, req)
+    }
+    if (error.message === 'CHALLENGE_NOT_ACTIVE') {
+      return sendError(res, { statusCode: 400, messageKey: 'challenge.notActive' }, req)
     }
     next(error)
   }

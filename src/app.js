@@ -39,13 +39,25 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept-Language'],
 }))
 
+// Proxy AI matchmaking → Flask (chat_app_kaggle), cùng máy: ngrok http 5000 (Node) + Flask CHAT_APP_PORT=5010
+const AI_MATCHMAKING_INTERNAL_URL = process.env.AI_MATCHMAKING_INTERNAL_URL?.trim()
+
 // Routes that do not require DB (so we can return 503 for others when MONGODB_URI is missing)
 const NO_DB_PATHS = ['/api/health', '/api/health/db', '/health', '/health/db']
+if (AI_MATCHMAKING_INTERNAL_URL) {
+  NO_DB_PATHS.push('/api/matchmake')
+}
 const isNoDbPath = (path) => path === '/api' || path === '' || path === '/' || NO_DB_PATHS.some((p) => path === p || path.startsWith(p + '?'))
 
 app.use(async (req, res, next) => {
   try {
-    if (!process.env.MONGODB_URI && !(req.method === 'GET' && isNoDbPath(req.path))) {
+    const matchmakeProxyBypass =
+      AI_MATCHMAKING_INTERNAL_URL && req.path === '/api/matchmake' && req.method === 'POST'
+    if (
+      !process.env.MONGODB_URI &&
+      !(req.method === 'GET' && isNoDbPath(req.path)) &&
+      !matchmakeProxyBypass
+    ) {
       return res.status(503).json({
         success: false,
         message: 'Database not configured. Set MONGODB_URI in Vercel Environment Variables.',
@@ -104,6 +116,38 @@ app.get('/api/health/db', async (req, res) => {
     })
   }
 })
+
+// AI matchmaking: forward tới Flask (đăng ký trước router /api để không bị notFound)
+if (AI_MATCHMAKING_INTERNAL_URL) {
+  app.post('/api/matchmake', async (req, res) => {
+    const target = AI_MATCHMAKING_INTERNAL_URL
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      }
+      if (/ngrok/i.test(target)) {
+        headers['ngrok-skip-browser-warning'] = '69420'
+        headers['User-Agent'] =
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+      const r = await fetch(target, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(req.body ?? {}),
+      })
+      const buf = Buffer.from(await r.arrayBuffer())
+      const ct = r.headers.get('content-type')
+      if (ct) res.setHeader('Content-Type', ct.split(';')[0].trim())
+      res.status(r.status).send(buf)
+    } catch (err) {
+      res.status(502).json({
+        success: false,
+        message: err?.message || 'AI_MATCHMAKING_PROXY_FAILED',
+      })
+    }
+  })
+}
 
 // API base info
 app.get('/api', (req, res) => {

@@ -47,6 +47,28 @@ export const sendMessage = async (req, res, next) => {
   }
 }
 
+/** Stream: dòng 1 JSON meta, sau đó text/plain chunk (proxy CHAT_BOT_APP hoặc chunk Gemini). */
+export const sendMessageStream = async (req, res, next) => {
+  try {
+    await chatbotService.pipeChatStream(req.userId, req.body, res)
+  } catch (error) {
+    if (error.message === 'CONVERSATION_NOT_FOUND') {
+      if (!res.headersSent) {
+        return sendError(res, { statusCode: 404, messageKey: 'chatbot.conversationNotFound' }, req)
+      }
+    }
+    if (!res.headersSent) {
+      next(error)
+    } else {
+      try {
+        res.end()
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
 export const deleteConversation = async (req, res, next) => {
   try {
     await chatbotService.deleteConversation(req.userId, req.params.conversationId)

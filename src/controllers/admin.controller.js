@@ -28,13 +28,21 @@ export const updateUserRole = async (req, res, next) => {
     if (error.message === 'USER_NOT_FOUND') {
       return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
     }
+    if (error.message === 'CANNOT_DEMOTE_LAST_ADMIN') {
+      return sendError(res, { statusCode: 400, messageKey: 'admin.cannotDemoteLastAdmin' }, req)
+    }
+    if (error.message === 'INVALID_ROLE') {
+      return sendError(res, { statusCode: 400, messageKey: 'common.validationFailed' }, req)
+    }
     next(error)
   }
 }
 
 export const updateUserStatus = async (req, res, next) => {
   try {
-    const user = await adminService.updateUserStatus(req.params.id, req.body)
+    const user = await adminService.updateUserStatus(req.params.id, req.body, {
+      notifyLang: req.language || 'vi',
+    })
     return sendSuccess(res, {
       messageKey: 'admin.statusUpdated',
       data: { user },
@@ -42,6 +50,66 @@ export const updateUserStatus = async (req, res, next) => {
   } catch (error) {
     if (error.message === 'USER_NOT_FOUND') {
       return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    if (error.message === 'INVALID_STATUS') {
+      return sendError(res, { statusCode: 400, messageKey: 'common.validationFailed' }, req)
+    }
+    next(error)
+  }
+}
+
+export const getUserById = async (req, res, next) => {
+  try {
+    const user = await adminService.getUserByIdForAdmin(req.params.id)
+    return sendSuccess(res, { messageKey: 'admin.userDetailSuccess', data: { user } }, req)
+  } catch (error) {
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+export const updateUserByAdmin = async (req, res, next) => {
+  try {
+    const user = await adminService.updateUserByAdmin(req.params.id, req.body)
+    return sendSuccess(res, { messageKey: 'admin.userUpdated', data: { user } }, req)
+  } catch (error) {
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    if (error.message === 'EMAIL_EXISTS') {
+      return sendError(res, { statusCode: 409, messageKey: 'auth.emailExists' }, req)
+    }
+    next(error)
+  }
+}
+
+export const setUserPasswordByAdmin = async (req, res, next) => {
+  try {
+    await adminService.setUserPasswordByAdmin(req.params.id, req.body)
+    return sendSuccess(res, { messageKey: 'admin.passwordSet' }, req)
+  } catch (error) {
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+export const deleteUserByAdmin = async (req, res, next) => {
+  try {
+    await adminService.deleteUserByAdmin(req.userId, req.params.id)
+    return sendSuccess(res, { messageKey: 'admin.userDeleted' }, req)
+  } catch (error) {
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    if (error.message === 'CANNOT_DELETE_SELF') {
+      return sendError(res, { statusCode: 400, messageKey: 'admin.cannotDeleteSelf' }, req)
+    }
+    if (error.message === 'CANNOT_DELETE_LAST_ADMIN') {
+      return sendError(res, { statusCode: 400, messageKey: 'admin.cannotDeleteLastAdmin' }, req)
     }
     next(error)
   }
@@ -116,6 +184,44 @@ export const moderateComment = async (req, res, next) => {
   } catch (error) {
     if (error.message === 'COMMENT_NOT_FOUND') {
       return sendError(res, { statusCode: 404, messageKey: 'community.commentNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+// ========== CONTENT REPORTS (admin) ==========
+
+export const getContentReports = async (req, res, next) => {
+  try {
+    const { page, limit, status, targetType } = req.query
+    const result = await adminService.getContentReports({ page, limit, status, targetType })
+    return sendPaginated(
+      res,
+      {
+        messageKey: 'admin.reportsSuccess',
+        data: result.reports,
+        pagination: result.pagination,
+      },
+      req
+    )
+  } catch (error) {
+    next(error)
+  }
+}
+
+export const updateContentReportStatus = async (req, res, next) => {
+  try {
+    const data = await adminService.updateContentReportStatus(req.params.id, req.body)
+    return sendSuccess(res, {
+      messageKey: 'admin.reportUpdated',
+      data,
+    }, req)
+  } catch (error) {
+    if (error.message === 'REPORT_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'admin.reportNotFound' }, req)
+    }
+    if (error.message === 'INVALID_REPORT_STATUS') {
+      return sendError(res, { statusCode: 400, messageKey: 'common.validationFailed' }, req)
     }
     next(error)
   }

@@ -1,5 +1,6 @@
 import * as authService from '../services/auth.service.js'
 import { sendSuccess, sendError } from '../dto/index.js'
+import { checkAndUnlockAchievements } from '../services/achievementUnlock.service.js'
 
 /**
  * Register new user
@@ -37,6 +38,15 @@ export const login = async (req, res, next) => {
 
     const data = await authService.login({ email, password })
 
+    // Fire-and-forget achievement check (streak-based)
+    const userId = data?.user?.id || data?.user?._id
+    if (userId) {
+      const io = req.app.get('io')
+      checkAndUnlockAchievements(userId, { io }).catch((e) =>
+        console.warn('[achievement] login check failed:', e?.message)
+      )
+    }
+
     return sendSuccess(res, {
       messageKey: 'auth.loginSuccess',
       data,
@@ -54,6 +64,12 @@ export const login = async (req, res, next) => {
         messageKey: 'auth.accountBanned',
       }, req)
     }
+    if (error.message === 'ACCOUNT_INACTIVE') {
+      return sendError(res, {
+        statusCode: 403,
+        messageKey: 'auth.accountInactive',
+      }, req)
+    }
     next(error)
   }
 }
@@ -66,22 +82,27 @@ export const loginWithGoogle = async (req, res, next) => {
   try {
     const { idToken } = req.body
     const data = await authService.loginWithGoogle({ idToken })
+    // Fire-and-forget achievement check
+    const userId = data?.user?.id || data?.user?._id
+    if (userId) {
+      const io = req.app.get('io')
+      checkAndUnlockAchievements(userId, { io }).catch((e) =>
+        console.warn('[achievement] loginWithGoogle check failed:', e?.message)
+      )
+    }
     return sendSuccess(res, {
       messageKey: 'auth.loginSuccess',
       data,
     }, req)
   } catch (error) {
     if (error.message === 'ACCOUNT_BANNED') {
-      return sendError(res, {
-        statusCode: 403,
-        messageKey: 'auth.accountBanned',
-      }, req)
+      return sendError(res, { statusCode: 403, messageKey: 'auth.accountBanned' }, req)
+    }
+    if (error.message === 'ACCOUNT_INACTIVE') {
+      return sendError(res, { statusCode: 403, messageKey: 'auth.accountInactive' }, req)
     }
     if (error.message === 'SOCIAL_TOKEN_INVALID') {
-      return sendError(res, {
-        statusCode: 401,
-        messageKey: 'auth.invalidCredentials',
-      }, req)
+      return sendError(res, { statusCode: 401, messageKey: 'auth.invalidCredentials' }, req)
     }
     if (error.message === 'EMAIL_REQUIRED') {
       return sendError(res, {
@@ -102,22 +123,27 @@ export const loginWithFacebook = async (req, res, next) => {
   try {
     const { accessToken } = req.body
     const data = await authService.loginWithFacebook({ accessToken })
+    // Fire-and-forget achievement check
+    const userId = data?.user?.id || data?.user?._id
+    if (userId) {
+      const io = req.app.get('io')
+      checkAndUnlockAchievements(userId, { io }).catch((e) =>
+        console.warn('[achievement] loginWithFacebook check failed:', e?.message)
+      )
+    }
     return sendSuccess(res, {
       messageKey: 'auth.loginSuccess',
       data,
     }, req)
   } catch (error) {
     if (error.message === 'ACCOUNT_BANNED') {
-      return sendError(res, {
-        statusCode: 403,
-        messageKey: 'auth.accountBanned',
-      }, req)
+      return sendError(res, { statusCode: 403, messageKey: 'auth.accountBanned' }, req)
+    }
+    if (error.message === 'ACCOUNT_INACTIVE') {
+      return sendError(res, { statusCode: 403, messageKey: 'auth.accountInactive' }, req)
     }
     if (error.message === 'SOCIAL_TOKEN_INVALID') {
-      return sendError(res, {
-        statusCode: 401,
-        messageKey: 'auth.invalidCredentials',
-      }, req)
+      return sendError(res, { statusCode: 401, messageKey: 'auth.invalidCredentials' }, req)
     }
     if (error.message === 'EMAIL_REQUIRED') {
       return sendError(res, {
@@ -149,6 +175,18 @@ export const refresh = async (req, res, next) => {
       return sendError(res, {
         statusCode: 401,
         messageKey: 'auth.refreshTokenInvalid',
+      }, req)
+    }
+    if (error.message === 'ACCOUNT_BANNED') {
+      return sendError(res, {
+        statusCode: 403,
+        messageKey: 'auth.accountBanned',
+      }, req)
+    }
+    if (error.message === 'ACCOUNT_INACTIVE') {
+      return sendError(res, {
+        statusCode: 403,
+        messageKey: 'auth.accountInactive',
       }, req)
     }
     next(error)
@@ -265,3 +303,107 @@ export const resetPassword = async (req, res, next) => {
     next(error)
   }
 }
+
+/**
+ * Change password (authenticated)
+ * POST /api/user/change-password
+ */
+export const changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body
+    await authService.changePassword(req.userId, { currentPassword, newPassword })
+    return sendSuccess(res, { messageKey: 'user.passwordChanged' }, req)
+  } catch (error) {
+    if (error.message === 'WRONG_PASSWORD') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.wrongPassword' }, req)
+    }
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Request email change OTP
+ * POST /api/user/change-email/request
+ */
+export const requestEmailChange = async (req, res, next) => {
+  try {
+    const { newEmail } = req.body
+    const lang = req.language || 'vi'
+    await authService.requestEmailChangeOtp(req.userId, newEmail, lang)
+    return sendSuccess(res, { messageKey: 'user.emailOtpSent' }, req)
+  } catch (error) {
+    if (error.message === 'EMAIL_EXISTS') {
+      return sendError(res, { statusCode: 409, messageKey: 'auth.emailExists' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Confirm email change with OTP
+ * POST /api/user/change-email/confirm
+ */
+export const confirmEmailChange = async (req, res, next) => {
+  try {
+    const { otp } = req.body
+    const user = await authService.confirmEmailChange(req.userId, otp)
+    // Update stored user in response so FE can sync
+    return sendSuccess(res, { messageKey: 'user.emailChanged', data: { user } }, req)
+  } catch (error) {
+    if (error.message === 'OTP_INVALID') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.otpInvalid' }, req)
+    }
+    if (error.message === 'OTP_EXPIRED') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.otpExpired' }, req)
+    }
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Request account deletion OTP
+ * POST /api/user/delete-account/request
+ */
+export const requestDeleteAccount = async (req, res, next) => {
+  try {
+    const lang = req.language || 'vi'
+    await authService.requestDeleteAccountOtp(req.userId, lang)
+    return sendSuccess(res, { messageKey: 'user.deleteOtpSent' }, req)
+  } catch (error) {
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Confirm account deletion with OTP
+ * POST /api/user/delete-account/confirm
+ */
+export const confirmDeleteAccount = async (req, res, next) => {
+  try {
+    const { otp } = req.body
+    await authService.confirmDeleteAccount(req.userId, otp)
+    return sendSuccess(res, { messageKey: 'user.accountDeleted' }, req)
+  } catch (error) {
+    if (error.message === 'OTP_INVALID') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.otpInvalid' }, req)
+    }
+    if (error.message === 'OTP_EXPIRED') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.otpExpired' }, req)
+    }
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+

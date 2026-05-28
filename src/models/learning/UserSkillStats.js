@@ -19,6 +19,8 @@ const userSkillStatsSchema = new mongoose.Schema({
   averageScore: { type: Number, default: 0 },
   highestScore: { type: Number, default: 0 },
   totalXpEarned: { type: Number, default: 0 },
+  weeklyXpEarned: { type: Number, default: 0 },
+  lastWeeklyXpReset: { type: Date, default: null },
   skillLevel: {
     type: String,
     enum: ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'],

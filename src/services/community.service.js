@@ -3,7 +3,9 @@ import { Post, Reaction, Comment, User, Friendship } from '../models/index.js'
 import { PostDTO, PostDetailDTO, CommentDTO, CommentDetailDTO } from '../dto/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
 import * as notificationService from './notification.service.js'
+import { incrementPeriodicQuestsForCategory } from './userPeriodicQuest.service.js'
 import { emitToUser } from '../config/socket.js'
+import { checkAndThrowIfViolation } from './moderation.service.js'
 
 /** Extract unique hashtag strings from content (without #) */
 function extractHashtags(content) {
@@ -387,6 +389,16 @@ export const getPostDocument = async (postId, index) => {
  * content is stored as-is including @mention text (e.g. "Hello @John Doe"); mentions array holds user IDs for refs.
  */
 export const createPost = async (userId, data, io = null) => {
+  // ── Kiểm duyệt nội dung trước khi lưu ──────────────────────────────
+  let moderationResult = { violationScore: 0, level: 'none', label: 'Không vi phạm', keywords: [] }
+  if (data.content && String(data.content).trim()) {
+    const res = await checkAndThrowIfViolation(data.content)
+    if (res && res.result) {
+      moderationResult = res.result
+    }
+  }
+  // ────────────────────────────────────────────────────────────────────
+
   const tags = Array.isArray(data.tags) && data.tags.length > 0
     ? data.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean)
     : extractHashtags(data.content)
@@ -408,7 +420,15 @@ export const createPost = async (userId, data, io = null) => {
     lessonId: data.lessonId,
     challengeId: data.challengeId,
     sharedPostId: data.sharedPostId || null,
+    moderation: moderationResult,
   })
+
+  try {
+    await incrementPeriodicQuestsForCategory(userId, 'community_post', 1)
+    await incrementPeriodicQuestsForCategory(userId, 'all', 1)
+  } catch (e) {
+    console.warn('[periodicQuest] community_post bump:', e?.message)
+  }
 
   if (data.sharedPostId) {
     const sid = String(data.sharedPostId).trim()
@@ -443,7 +463,17 @@ export const updatePost = async (userId, postId, data, io = null) => {
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
   if (post.authorId.toString() !== userId) throw new Error('FORBIDDEN')
 
-  if (data.content !== undefined) post.content = data.content
+  if (data.content !== undefined) {
+    post.content = data.content
+    if (String(data.content).trim()) {
+      const res = await checkAndThrowIfViolation(data.content)
+      if (res && res.result) {
+        post.moderation = res.result
+      }
+    } else {
+      post.moderation = { violationScore: 0, level: 'none', label: 'Không vi phạm', keywords: [] }
+    }
+  }
   if (data.images !== undefined) post.images = data.images
   if (data.video !== undefined) {
     post.video = typeof data.video === 'string' && data.video.trim() ? data.video.trim() : null

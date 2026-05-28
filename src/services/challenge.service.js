@@ -2,6 +2,17 @@ import { Challenge, ChallengeParticipant, User } from '../models/index.js'
 import { ChallengeDTO, ChallengeParticipantDTO } from '../dto/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
 
+async function awardChallengeCompletion(participant, challenge, userId) {
+  if (!challenge) return
+  participant.xpEarned = challenge.xpReward || 0
+  await Challenge.findByIdAndUpdate(challenge._id, { $inc: { completedCount: 1 } })
+  const user = await User.findById(userId)
+  if (user) {
+    user.awardXp(challenge.xpReward || 0)
+    await user.save()
+  }
+}
+
 /**
  * Get active challenges
  */
@@ -95,25 +106,98 @@ export const joinChallenge = async (userId, challengeId) => {
  * Update challenge progress
  */
 export const updateChallengeProgress = async (userId, challengeId, { progress }) => {
-  const participant = await ChallengeParticipant.findOne({ challengeId, userId })
-  if (!participant) throw new Error('NOT_JOINED')
+  const challenge = await Challenge.findById(challengeId)
+  if (!challenge) throw new Error('CHALLENGE_NOT_FOUND')
+  const now = new Date()
+  if (
+    challenge.status !== 'active'
+    || (challenge.startDate && challenge.startDate > now)
+    || (challenge.endDate && challenge.endDate < now)
+  ) {
+    throw new Error('CHALLENGE_NOT_ACTIVE')
+  }
 
-  participant.progress = progress
-  if (progress >= participant.target && !participant.completed) {
+  let participant = await ChallengeParticipant.findOne({ challengeId, userId })
+  if (!participant) {
+    participant = await ChallengeParticipant.create({
+      challengeId,
+      userId,
+      target: challenge.requirement?.target || 0,
+      progress: 0,
+      completed: false,
+      joinedAt: now,
+    })
+    await Challenge.findByIdAndUpdate(challengeId, { $inc: { participantCount: 1 } })
+  }
+
+  const nextProgress = Number(progress)
+  participant.progress = Number.isFinite(nextProgress) ? nextProgress : participant.progress
+  if (participant.progress >= participant.target && !participant.completed) {
     participant.completed = true
     participant.completedAt = new Date()
-
-    const challenge = await Challenge.findById(challengeId)
-    if (challenge) {
-      participant.xpEarned = challenge.xpReward || 0
-      await Challenge.findByIdAndUpdate(challengeId, { $inc: { completedCount: 1 } })
-      await User.findByIdAndUpdate(userId, {
-        $inc: { xp: challenge.xpReward || 0, totalXp: challenge.xpReward || 0 },
-      })
-    }
+    await awardChallengeCompletion(participant, challenge, userId)
   }
   await participant.save()
   return new ChallengeParticipantDTO(participant)
+}
+
+/**
+ * Auto bump progress for active joined challenges by requirement type.
+ * Used by domain events (lesson completion, online time, login streak, etc.)
+ */
+export const incrementChallengeProgressByRequirement = async (userId, requirementType, delta = 1) => {
+  const inc = Number(delta)
+  if (!Number.isFinite(inc) || inc <= 0) return 0
+
+  const now = new Date()
+  const activeChallenges = await Challenge.find({
+    status: 'active',
+    'requirement.type': requirementType,
+    startDate: { $lte: now },
+    endDate: { $gte: now },
+  })
+    .select('_id xpReward requirement')
+    .lean()
+  if (!activeChallenges.length) return 0
+
+  const challengeMap = new Map(activeChallenges.map((c) => [c._id.toString(), c]))
+  const participants = await ChallengeParticipant.find({
+    userId,
+    challengeId: { $in: activeChallenges.map((c) => c._id) },
+  })
+  const participantMap = new Map(participants.map((p) => [p.challengeId.toString(), p]))
+
+  let updatedCount = 0
+  for (const challenge of activeChallenges) {
+    const challengeId = challenge._id.toString()
+    let participant = participantMap.get(challengeId)
+    if (!participant) {
+      participant = await ChallengeParticipant.create({
+        challengeId: challenge._id,
+        userId,
+        target: challenge.requirement?.target || 0,
+        progress: 0,
+        completed: false,
+        joinedAt: now,
+      })
+      participantMap.set(challengeId, participant)
+      await Challenge.findByIdAndUpdate(challenge._id, { $inc: { participantCount: 1 } })
+    }
+    if (participant.completed) continue
+
+    const challengeDoc = challengeMap.get(challengeId)
+    if (!challengeDoc) continue
+    participant.progress = (Number(participant.progress) || 0) + inc
+    if (participant.progress >= participant.target && !participant.completed) {
+      participant.completed = true
+      participant.completedAt = new Date()
+      await awardChallengeCompletion(participant, challengeDoc, userId)
+    }
+    await participant.save()
+    updatedCount += 1
+  }
+
+  return updatedCount
 }
 
 /**
@@ -121,18 +205,55 @@ export const updateChallengeProgress = async (userId, challengeId, { progress })
  */
 export const getUserChallenges = async (userId, { page = 1, limit = 10 }) => {
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
-  const total = await ChallengeParticipant.countDocuments({ userId })
-  const participants = await ChallengeParticipant.find({ userId })
-    .populate('challengeId')
-    .sort({ joinedAt: -1 })
-    .skip(skip)
-    .limit(perPage)
+  const now = new Date()
 
-  return {
-    challenges: participants.map(p => ({
+  const [participants, activeChallenges] = await Promise.all([
+    ChallengeParticipant.find({ userId })
+      .populate('challengeId')
+      .sort({ joinedAt: -1 })
+      .lean(),
+    Challenge.find({
+      status: 'active',
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+    })
+      .sort({ endDate: 1, createdAt: -1 })
+      .lean(),
+  ])
+
+  const mergedByChallengeId = new Map()
+
+  for (const p of participants) {
+    const cid = p.challengeId?._id?.toString?.() || p.challengeId?.toString?.()
+    if (!cid || mergedByChallengeId.has(cid)) continue
+    mergedByChallengeId.set(cid, {
       ...new ChallengeParticipantDTO(p),
       challenge: p.challengeId ? new ChallengeDTO(p.challengeId) : null,
-    })),
+    })
+  }
+
+  for (const c of activeChallenges) {
+    const cid = c._id.toString()
+    if (mergedByChallengeId.has(cid)) continue
+    mergedByChallengeId.set(cid, {
+      challengeId: cid,
+      userId,
+      progress: 0,
+      target: c.requirement?.target || 0,
+      completed: false,
+      xpEarned: 0,
+      joinedAt: null,
+      completedAt: null,
+      challenge: new ChallengeDTO(c),
+    })
+  }
+
+  const merged = Array.from(mergedByChallengeId.values())
+  const total = merged.length
+  const rows = merged.slice(skip, skip + perPage)
+
+  return {
+    challenges: rows,
     pagination: getPagination({ page, limit: perPage, total }),
   }
 }

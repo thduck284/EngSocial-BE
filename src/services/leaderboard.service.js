@@ -1,10 +1,15 @@
-import { LeaderboardSnapshot, User } from '../models/index.js'
+import { LeaderboardSnapshot, User, Friendship } from '../models/index.js'
 import { LeaderboardSnapshotDTO } from '../dto/index.js'
+import { getISOWeekNumber } from './userPeriodicQuest.service.js'
 
 /**
  * Get leaderboard by type and period
  */
-export const getLeaderboard = async ({ type = 'weekly', period }) => {
+export const getLeaderboard = async ({ type = 'weekly', period, userId }) => {
+  if (type === 'weekly' && userId) {
+    return await generateFriendsLeaderboard(userId, 'weekly')
+  }
+
   const filter = { type }
   if (period) filter.period = period
 
@@ -15,25 +20,36 @@ export const getLeaderboard = async ({ type = 'weekly', period }) => {
   return await generateLeaderboard(type)
 }
 
-/**
- * Generate leaderboard from live user data
- */
-export const generateLeaderboard = async (type = 'weekly') => {
+const generateFriendsLeaderboard = async (userId, type) => {
   const now = new Date()
-  let period
+  
+  // Find friends
+  const friendships = await Friendship.find({
+    $or: [{ userId }, { friendId: userId }],
+    status: 'accepted'
+  }).lean()
+  
+  const userIds = friendships.map(f => f.userId.toString() === userId.toString() ? f.friendId : f.userId)
+  userIds.push(userId) // include self
+
+  let query = { _id: { $in: userIds }, status: 'active' }
+  let sortField = 'totalXp'
+  let selectFields = 'name avatar level totalXp xp'
 
   if (type === 'weekly') {
-    const weekNum = getWeekNumber(now)
-    period = `${now.getFullYear()}-W${String(weekNum).padStart(2, '0')}`
-  } else if (type === 'monthly') {
-    period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  } else {
-    period = 'all_time'
+    const startOfWeek = new Date(now)
+    startOfWeek.setHours(0, 0, 0, 0)
+    const day = startOfWeek.getDay() || 7 // 1=Mon, 7=Sun
+    startOfWeek.setDate(startOfWeek.getDate() - day + 1)
+    
+    query.lastWeeklyXpReset = { $gte: startOfWeek }
+    sortField = 'weeklyXp'
+    selectFields = 'name avatar level totalXp weeklyXp xp'
   }
 
-  const users = await User.find({ status: 'active' })
-    .select('name avatar level totalXp xp')
-    .sort({ totalXp: -1 })
+  const users = await User.find(query)
+    .select(selectFields)
+    .sort({ [sortField]: -1 })
     .limit(100)
 
   const entries = users.map((u, idx) => ({
@@ -41,7 +57,59 @@ export const generateLeaderboard = async (type = 'weekly') => {
     userId: u._id,
     name: u.name,
     avatar: u.avatar,
-    xp: u.totalXp || 0,
+    xp: type === 'weekly' ? (u.weeklyXp || 0) : (u.totalXp || 0),
+    level: u.level || 1,
+  }))
+
+  return {
+    type,
+    period: 'dynamic',
+    generatedAt: now,
+    entries
+  }
+}
+
+/**
+ * Generate leaderboard from live user data
+ */
+export const generateLeaderboard = async (type = 'weekly') => {
+  const now = new Date()
+  let period
+  let query = { status: 'active' }
+  let sortField = 'totalXp'
+  let selectFields = 'name avatar level totalXp xp'
+
+  if (type === 'weekly') {
+    const { weekNo, year } = getISOWeekNumber(now)
+    period = `${year}-W${String(weekNo).padStart(2, '0')}`
+    
+    // Calculate start of current week (Monday)
+    const startOfWeek = new Date(now)
+    startOfWeek.setHours(0, 0, 0, 0)
+    const day = startOfWeek.getDay() || 7 // 1=Mon, 7=Sun
+    startOfWeek.setDate(startOfWeek.getDate() - day + 1)
+    
+    // Only fetch users who have earned XP this week
+    query.lastWeeklyXpReset = { $gte: startOfWeek }
+    sortField = 'weeklyXp'
+    selectFields = 'name avatar level totalXp weeklyXp xp'
+  } else if (type === 'monthly') {
+    period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  } else {
+    period = 'all_time'
+  }
+
+  const users = await User.find(query)
+    .select(selectFields)
+    .sort({ [sortField]: -1 })
+    .limit(100)
+
+  const entries = users.map((u, idx) => ({
+    rank: idx + 1,
+    userId: u._id,
+    name: u.name,
+    avatar: u.avatar,
+    xp: type === 'weekly' ? (u.weeklyXp || 0) : (u.totalXp || 0),
     level: u.level || 1,
   }))
 
@@ -55,7 +123,6 @@ export const generateLeaderboard = async (type = 'weekly') => {
 }
 
 function getWeekNumber(d) {
-  const oneJan = new Date(d.getFullYear(), 0, 1)
-  const numberOfDays = Math.floor((d - oneJan) / (24 * 60 * 60 * 1000))
-  return Math.ceil((numberOfDays + oneJan.getDay() + 1) / 7)
+  const { weekNo } = getISOWeekNumber(d)
+  return weekNo
 }
