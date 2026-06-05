@@ -228,6 +228,18 @@ export const unblockUser = async (req, res, next) => {
   }
 }
 
+export const getBlockedUsers = async (req, res, next) => {
+  try {
+    const blockedUsers = await userService.getBlockedUsers(req.userId)
+    return sendSuccess(res, { data: { blockedUsers } }, req)
+  } catch (error) {
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
 /**
  * Upload avatar image
  * POST /api/user/avatar (multipart/form-data, field: avatar)

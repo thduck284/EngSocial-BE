@@ -5,4 +5,5 @@ export const sendChatMessageSchema = Joi.object({
   message: Joi.string().required().max(2000),
   skill: Joi.string().valid('reading', 'listening', 'writing', 'general'),
   lessonId: Joi.string(),
+  replyLanguage: Joi.string().valid('en', 'vi'),
 })

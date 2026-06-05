@@ -319,3 +319,17 @@ export const unblockUser = async (currentUserId, targetUserId) => {
   })
   return { unblocked: true }
 }
+
+export const getBlockedUsers = async (userId) => {
+  const user = await User.findById(userId)
+    .select('blockedUserIds')
+    .populate('blockedUserIds', 'name avatar level')
+    .lean()
+  if (!user) throw new Error('USER_NOT_FOUND')
+  return (user.blockedUserIds || []).map(u => ({
+    id: u._id.toString(),
+    name: u.name,
+    avatar: u.avatar,
+    level: u.level || 1,
+  }))
+}

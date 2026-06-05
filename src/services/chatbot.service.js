@@ -1,16 +1,76 @@
+import { Agent } from 'undici'
 import { ChatbotConversation, ChatbotMessage } from '../models/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
-import { GoogleGenAI } from '@google/genai'
+import { resolveReplyLanguage } from '../utils/detectMessageLanguage.js'
 import dotenv from 'dotenv'
 
 dotenv.config()
 
+let _chatBotTlsAgent = null
+
+function isNgrokHost(url) {
+  return /ngrok/i.test(url || '')
+}
+
+/** Windows dev: Node hay lỗi SSL tới ngrok (UNABLE_TO_VERIFY_LEAF_SIGNATURE). */
+function chatBotTlsInsecureEnabled() {
+  const flag = (process.env.CHAT_BOT_TLS_INSECURE || '').trim().toLowerCase()
+  if (flag === '1' || flag === 'true' || flag === 'yes') return true
+  if (process.env.NODE_ENV === 'production') return false
+  return isNgrokHost(process.env.CHAT_BOT_APP || '')
+}
+
+function chatBotFetchDispatcher() {
+  if (!chatBotTlsInsecureEnabled()) return undefined
+  if (!_chatBotTlsAgent) {
+    _chatBotTlsAgent = new Agent({ connect: { rejectUnauthorized: false } })
+  }
+  return _chatBotTlsAgent
+}
+
+function chatBotFetch(url, init = {}) {
+  const dispatcher = chatBotFetchDispatcher()
+  return fetch(url, dispatcher ? { ...init, dispatcher } : init)
+}
+
 const FLASK_MAX_HISTORY_TURNS = 3
 
+/** Base URL Flask (không kèm path). CHAT_BOT_APP chỉ là origin ngrok, ví dụ https://xxxx.ngrok-free.app */
 function chatBotAppBaseUrl() {
   const raw = (process.env.CHAT_BOT_APP || '').trim()
   if (!raw) return ''
-  return raw.replace(/\/+$/, '')
+  let base = raw.replace(/\/+$/, '')
+  // Gỡ path sai nếu dán nhầm URL backend EngSocial
+  base = base.replace(/\/api\/chatbot\/chat\/stream$/i, '')
+  base = base.replace(/\/api\/chatbot\/chat$/i, '')
+  base = base.replace(/\/api\/chatbot$/i, '')
+  base = base.replace(/\/api\/chat\/stream$/i, '')
+  return base.replace(/\/+$/, '')
+}
+
+/** Endpoint Flask đúng: {CHAT_BOT_APP}/api/chat/stream (không phải /api/chatbot/chat/stream). */
+function chatBotStreamUrl() {
+  const base = chatBotAppBaseUrl()
+  if (!base) return ''
+  return `${base}/api/chat/stream`
+}
+
+function chatBotUnavailableMessage(err) {
+  const base = chatBotAppBaseUrl()
+  if (!base) {
+    return 'Chat server chưa được cấu hình. Thêm CHAT_BOT_APP vào file .env của backend.'
+  }
+  const detail = (err?.message || '').trim()
+  if (/UNABLE_TO_VERIFY|certificate|CERT_/i.test(detail)) {
+    return 'Lỗi SSL khi gọi ngrok từ Node. Dev: đặt CHAT_BOT_TLS_INSECURE=1 trong .env (hoặc restart BE — đã tự bật khi NODE_ENV=development và URL ngrok).'
+  }
+  if (/fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|AbortError/i.test(detail)) {
+    return 'Không kết nối được chat server. Hãy chạy test.py (hoặc app_chatbot.py), bật ngrok và cập nhật URL mới vào CHAT_BOT_APP trong .env.'
+  }
+  if (detail) {
+    return `Không kết nối được chat server: ${detail}`
+  }
+  return 'Không nhận được phản hồi từ chat server. Kiểm tra CHAT_BOT_APP và server đang chạy.'
 }
 
 /**
@@ -40,7 +100,7 @@ function flaskStreamHeaders(baseUrl) {
     'Content-Type': 'application/json',
     Accept: 'text/plain, */*',
   }
-  if (/ngrok\.(app|io|dev)/i.test(baseUrl)) {
+  if (isNgrokHost(baseUrl)) {
     headers['ngrok-skip-browser-warning'] = '69420'
     headers['User-Agent'] =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -48,12 +108,21 @@ function flaskStreamHeaders(baseUrl) {
   return headers
 }
 
-async function fetchChatBotAppReply(baseUrl, message, history) {
-  const url = `${baseUrl}/api/chat/stream`
-  const res = await fetch(url, {
+function flaskChatPayload(message, history, replyLanguage) {
+  return JSON.stringify({
+    message,
+    history,
+    replyLanguage: replyLanguage === 'en' ? 'en' : 'vi',
+  })
+}
+
+async function fetchChatBotAppReply(message, history, replyLanguage) {
+  const url = chatBotStreamUrl()
+  if (!url) throw new Error('CHAT_BOT_APP_NOT_CONFIGURED')
+  const res = await chatBotFetch(url, {
     method: 'POST',
-    headers: flaskStreamHeaders(baseUrl),
-    body: JSON.stringify({ message, history }),
+    headers: flaskStreamHeaders(url),
+    body: flaskChatPayload(message, history, replyLanguage),
   })
   const text = await res.text()
   if (!res.ok) {
@@ -62,13 +131,45 @@ async function fetchChatBotAppReply(baseUrl, message, history) {
   return text
 }
 
-async function openChatBotAppStream(baseUrl, message, history) {
-  const url = `${baseUrl}/api/chat/stream`
-  return fetch(url, {
+async function openChatBotAppStream(message, history, replyLanguage) {
+  const url = chatBotStreamUrl()
+  if (!url) throw new Error('CHAT_BOT_APP_NOT_CONFIGURED')
+  return chatBotFetch(url, {
     method: 'POST',
-    headers: flaskStreamHeaders(baseUrl),
-    body: JSON.stringify({ message, history }),
+    headers: flaskStreamHeaders(url),
+    body: flaskChatPayload(message, history, replyLanguage),
+    signal: AbortSignal.timeout(300_000),
   })
+}
+
+/** Đọc stream từ Flask CHAT_BOT_APP; trả text đầy đủ. */
+async function streamFromChatBotApp(res, message, history, replyLanguage) {
+  const upstream = await openChatBotAppStream(message, history, replyLanguage)
+  if (!upstream.ok) {
+    const errText = await upstream.text().catch(() => '')
+    throw new Error(`HTTP ${upstream.status}: ${errText.slice(0, 200) || 'upstream error'}`)
+  }
+  if (!upstream.body) {
+    throw new Error('EMPTY_BODY')
+  }
+  let full = ''
+  const reader = upstream.body.getReader()
+  const dec = new TextDecoder()
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    const chunk = dec.decode(value, { stream: true })
+    full += chunk
+    res.write(Buffer.from(chunk, 'utf8'))
+    if (typeof res.flush === 'function') {
+      res.flush()
+    }
+  }
+  const trimmed = full.trim()
+  if (!trimmed || /^\[Lỗi/i.test(trimmed)) {
+    throw new Error('EMPTY_OR_ERROR_PAYLOAD')
+  }
+  return full
 }
 
 /**
@@ -159,19 +260,18 @@ async function createOrLoadConversationAndSaveUser(userId, { conversationId, mes
 }
 
 /**
- * Stream trả lời: dòng 1 JSON meta, sau đó là text thuần (proxy Flask hoặc chunk Gemini).
+ * Stream trả lời: dòng 1 JSON meta, sau đó là text thuần (proxy CHAT_BOT_APP).
  * Lưu assistant vào DB khi stream xong.
  */
 export const pipeChatStream = async (userId, body, res) => {
-  const { message, skill, lessonId, conversationId } = body
+  const { message, skill, lessonId, conversationId, replyLanguage: replyLangBody } = body
+  const replyLanguage = resolveReplyLanguage(message, replyLangBody)
   const { conversation, conversationId: cid, userMessage } = await createOrLoadConversationAndSaveUser(userId, {
     conversationId,
     message,
     skill,
     lessonId,
   })
-  const skillUsed = skill || conversation.skill
-
   res.status(200)
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
   res.setHeader('Cache-Control', 'no-cache, no-transform')
@@ -192,44 +292,16 @@ export const pipeChatStream = async (userId, body, res) => {
 
   let fullAssistant = ''
   try {
-    const base = chatBotAppBaseUrl()
-    if (base) {
-      const history = await buildFlaskHistoryPairs(cid)
-      const upstream = await openChatBotAppStream(base, message, history)
-      if (!upstream.ok) {
-        const errText = await upstream.text()
-        fullAssistant = `[Lỗi ${upstream.status}: ${errText.slice(0, 300)}]`
-        res.write(fullAssistant)
-      } else if (!upstream.body) {
-        fullAssistant = '[Lỗi: không có nội dung stream từ chat server.]'
-        res.write(fullAssistant)
-      } else {
-        const reader = upstream.body.getReader()
-        const dec = new TextDecoder()
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          const chunk = dec.decode(value, { stream: true })
-          fullAssistant += chunk
-          res.write(Buffer.from(chunk, 'utf8'))
-        }
-      }
-    } else {
-      const ai = await generateGeminiResponse(message, skillUsed, cid)
-      fullAssistant = (ai.content || '').replace(/\r\n/g, '\n')
-      const step = 40
-      for (let i = 0; i < fullAssistant.length; i += step) {
-        const part = fullAssistant.slice(i, i + step)
-        res.write(part)
-        await new Promise((r) => setImmediate(r))
-      }
+    if (!chatBotStreamUrl()) {
+      throw new Error('CHAT_BOT_APP_NOT_CONFIGURED')
     }
+    const history = await buildFlaskHistoryPairs(cid)
+    fullAssistant = await streamFromChatBotApp(res, message, history, replyLanguage)
   } catch (err) {
-    const msg = err?.message || 'STREAM_FAILED'
-    const tail = `\n[Lỗi: ${msg}]`
-    fullAssistant += tail
+    console.warn('[chatbot] CHAT_BOT_APP failed:', chatBotStreamUrl(), err?.message || err)
+    fullAssistant = chatBotUnavailableMessage(err)
     try {
-      res.write(tail)
+      res.write(fullAssistant)
     } catch {
       /* client đã đóng */
     }
@@ -253,7 +325,8 @@ export const pipeChatStream = async (userId, body, res) => {
 /**
  * Send a message to chatbot and get AI response
  */
-export const sendMessage = async (userId, { conversationId, message, skill, lessonId }) => {
+export const sendMessage = async (userId, { conversationId, message, skill, lessonId, replyLanguage: replyLangBody }) => {
+  const replyLanguage = resolveReplyLanguage(message, replyLangBody)
   const { conversation, conversationId: cid, userMessage } = await createOrLoadConversationAndSaveUser(userId, {
     conversationId,
     message,
@@ -262,7 +335,7 @@ export const sendMessage = async (userId, { conversationId, message, skill, less
   })
 
   // Generate AI response
-  const aiResponse = await generateAIResponse(message, skill || conversation.skill, cid)
+  const aiResponse = await generateAIResponse(message, skill || conversation.skill, cid, replyLanguage)
 
   // Save AI response
   const assistantMessage = await ChatbotMessage.create({
@@ -309,96 +382,21 @@ export const deleteConversation = async (userId, conversationId) => {
   return true
 }
 
-/** Chỉ Gemini (dùng cho pipeChatStream khi không có CHAT_BOT_APP). */
-async function generateGeminiResponse(message, skill, conversationId) {
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) {
-    return {
-      content: 'AI Service currently unavailable (Missing API Key). How can I help you today?',
-    }
+/** Phản hồi qua CHAT_BOT_APP (Flask / ngrok) — không dùng Gemini. */
+async function generateAIResponse(message, skill, conversationId, replyLanguage = 'vi') {
+  if (!chatBotStreamUrl()) {
+    return { content: chatBotUnavailableMessage() }
   }
-
   try {
-    const client = new GoogleGenAI({ apiKey })
-
-    const history = await ChatbotMessage.find({ conversationId })
-      .sort({ createdAt: 1 })
-      .limit(10)
-      .lean()
-
-    const systemPrompt = `You are a helpful English learning assistant on EngSocial. 
-    Users talk to you to improve their English skills (specifically: ${skill}). 
-    Keep responses friendly, educational, and encouraging. 
-    If appropriate, provide vocabulary tips or correct the user's grammar in a helpful way.`
-
-    const contents = history.map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }))
-    contents.push({ role: 'user', parts: [{ text: message }] })
-
-    const modelsToTry = [
-      'gemini-3-flash-preview',
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
-      'gemini-1.5-flash'
-    ]
-
-    let lastError = null
-    for (const modelName of modelsToTry) {
-      try {
-        const response = await client.models.generateContent({
-          model: modelName,
-          contents: contents,
-          config: {
-            systemInstruction: systemPrompt,
-          }
-        })
-
-        const content = response.text
-        return { content }
-      } catch (error) {
-        console.warn(`Chat model ${modelName} failed, trying next...`, error.message)
-        lastError = error
-      }
+    const history = await buildFlaskHistoryPairs(conversationId)
+    const raw = await fetchChatBotAppReply(message, history, replyLanguage)
+    const cleaned = (raw || '').replace(/\r\n/g, '\n').trim()
+    if (cleaned && !/^\[Lỗi/i.test(cleaned)) {
+      return { content: cleaned }
     }
-
-    throw lastError
-  } catch (error) {
-    console.error('Gemini Chat Error:', error)
-    return {
-      content: 'I am having some trouble connecting to my brain! All models are currently busy. Please try again in a moment.',
-    }
+    return { content: chatBotUnavailableMessage() }
+  } catch (err) {
+    console.warn('[chatbot] CHAT_BOT_APP failed:', chatBotStreamUrl(), err?.message || err)
+    return { content: chatBotUnavailableMessage(err) }
   }
-}
-
-/**
- * AI response: ưu tiên CHAT_BOT_APP (Flask/ngrok), fallback Gemini.
- */
-async function generateAIResponse(message, skill, conversationId) {
-  const kaggleBase = chatBotAppBaseUrl()
-  if (kaggleBase) {
-    try {
-      const history = await buildFlaskHistoryPairs(conversationId)
-      const raw = await fetchChatBotAppReply(kaggleBase, message, history)
-      const cleaned = (raw || '').replace(/\r\n/g, '\n').trim()
-      if (cleaned) {
-        return { content: cleaned }
-      }
-    } catch (err) {
-      console.warn('[chatbot] CHAT_BOT_APP failed, fallback Gemini:', err?.message || err)
-    }
-  }
-
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) {
-    return {
-      content:
-        kaggleBase
-          ? 'Không nhận được phản hồi từ chat server (CHAT_BOT_APP). Kiểm tra tunnel ngrok và notebook đang chạy.'
-          : 'AI Service currently unavailable (Missing API Key). How can I help you today?',
-    }
-  }
-
-  return generateGeminiResponse(message, skill, conversationId)
 }
