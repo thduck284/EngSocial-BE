@@ -12,11 +12,11 @@ function isNgrokHost(url) {
   return /ngrok/i.test(url || '')
 }
 
-/** Windows dev: Node hay lỗi SSL tới ngrok (UNABLE_TO_VERIFY_LEAF_SIGNATURE). */
+/** Node → ngrok hay lỗi UNABLE_TO_VERIFY_LEAF_SIGNATURE; tự bật khi URL là ngrok. */
 function chatBotTlsInsecureEnabled() {
   const flag = (process.env.CHAT_BOT_TLS_INSECURE || '').trim().toLowerCase()
+  if (flag === '0' || flag === 'false' || flag === 'no') return false
   if (flag === '1' || flag === 'true' || flag === 'yes') return true
-  if (process.env.NODE_ENV === 'production') return false
   return isNgrokHost(process.env.CHAT_BOT_APP || '')
 }
 
@@ -55,14 +55,21 @@ function chatBotStreamUrl() {
   return `${base}/api/chat/stream`
 }
 
+function chatBotFetchErrorDetail(err) {
+  const parts = [(err?.message || String(err)).trim()]
+  const code = err?.cause?.code || err?.code
+  if (code) parts.push(String(code))
+  return parts.filter(Boolean).join(' — ')
+}
+
 function chatBotUnavailableMessage(err) {
   const base = chatBotAppBaseUrl()
   if (!base) {
     return 'Chat server chưa được cấu hình. Thêm CHAT_BOT_APP vào file .env của backend.'
   }
-  const detail = (err?.message || '').trim()
+  const detail = chatBotFetchErrorDetail(err)
   if (/UNABLE_TO_VERIFY|certificate|CERT_/i.test(detail)) {
-    return 'Lỗi SSL khi gọi ngrok từ Node. Dev: đặt CHAT_BOT_TLS_INSECURE=1 trong .env (hoặc restart BE — đã tự bật khi NODE_ENV=development và URL ngrok).'
+    return 'Lỗi SSL khi gọi ngrok từ Node. Đặt CHAT_BOT_TLS_INSECURE=1 trên Render/local (hoặc dùng URL ngrok — BE sẽ tự bật).'
   }
   if (/fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|AbortError/i.test(detail)) {
     return 'Không kết nối được chat server. Hãy chạy test.py (hoặc app_chatbot.py), bật ngrok và cập nhật URL mới vào CHAT_BOT_APP trong .env.'
@@ -298,7 +305,7 @@ export const pipeChatStream = async (userId, body, res) => {
     const history = await buildFlaskHistoryPairs(cid)
     fullAssistant = await streamFromChatBotApp(res, message, history, replyLanguage)
   } catch (err) {
-    console.warn('[chatbot] CHAT_BOT_APP failed:', chatBotStreamUrl(), err?.message || err)
+    console.warn('[chatbot] CHAT_BOT_APP failed:', chatBotStreamUrl(), chatBotFetchErrorDetail(err))
     fullAssistant = chatBotUnavailableMessage(err)
     try {
       res.write(fullAssistant)
@@ -396,7 +403,7 @@ async function generateAIResponse(message, skill, conversationId, replyLanguage 
     }
     return { content: chatBotUnavailableMessage() }
   } catch (err) {
-    console.warn('[chatbot] CHAT_BOT_APP failed:', chatBotStreamUrl(), err?.message || err)
+    console.warn('[chatbot] CHAT_BOT_APP failed:', chatBotStreamUrl(), chatBotFetchErrorDetail(err))
     return { content: chatBotUnavailableMessage(err) }
   }
 }
