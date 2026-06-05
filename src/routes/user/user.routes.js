@@ -66,6 +66,7 @@ router.post('/avatar', auth, (req, res, next) => {
   })
 }, userController.uploadAvatar)
 
+router.get('/blocked', auth, userController.getBlockedUsers)
 router.post('/block/:userId', auth, userController.blockUser)
 router.delete('/block/:userId', auth, userController.unblockUser)
 

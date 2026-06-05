@@ -370,8 +370,22 @@ export const getFriendSuggestions = async (currentUserId, { limit = 10 }) => {
     f.userId.toString() === currentUserId ? f.friendId : f.userId
   )
 
+  // Get blocked users and users who blocked me
+  const currentUserDoc = await User.findById(currentUserId).select('blockedUserIds').lean()
+  const myBlockedIds = (currentUserDoc?.blockedUserIds || []).map(id => new mongoose.Types.ObjectId(id.toString()))
+
+  const usersWhoBlockedMe = await User.find({ blockedUserIds: currentId }).select('_id').lean()
+  const usersWhoBlockedMeIds = usersWhoBlockedMe.map(u => new mongoose.Types.ObjectId(u._id.toString()))
+
+  const allExcludedIds = [
+    currentId,
+    ...myFriendIds.map(id => new mongoose.Types.ObjectId(id.toString())),
+    ...myBlockedIds,
+    ...usersWhoBlockedMeIds
+  ]
+
   // 2. Get all friendships of my friends (second degree)
-  // We exclude current user and my existing friends from the suggestion pool later.
+  // We exclude current user, my existing friends, and blocked users from the suggestion pool.
   const pipeline = [
     {
       $match: {
@@ -398,7 +412,7 @@ export const getFriendSuggestions = async (currentUserId, { limit = 10 }) => {
     {
       $match: {
         potentialId: {
-          $nin: [currentId, ...myFriendIds],
+          $nin: allExcludedIds,
         },
       },
     },
@@ -415,13 +429,13 @@ export const getFriendSuggestions = async (currentUserId, { limit = 10 }) => {
   const rawSuggestions = await Friendship.aggregate(pipeline)
 
   if (rawSuggestions.length === 0) {
-    // If no mutual friends found, fallback to random active users
+    // If no mutual friends found, fallback to random active users (excluding blocked), limit to 15 users as requested
     const randomUsers = await User.find({
-      _id: { $nin: [currentId, ...myFriendIds] },
+      _id: { $nin: allExcludedIds },
       status: 'active',
     })
       .select('name avatar level totalXp')
-      .limit(Number(limit))
+      .limit(15)
       .lean()
 
     return randomUsers.map(u => ({
