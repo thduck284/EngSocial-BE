@@ -45,7 +45,8 @@
     "nodemailer": "^7.0.13",
     "socket.io": "^4.8.3",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "undici": "^6.23.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
