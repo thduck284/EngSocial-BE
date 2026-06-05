@@ -1,4 +1,4 @@
-import { Agent } from 'undici'
+import { Agent, fetch as undiciFetch } from 'undici'
 import { ChatbotConversation, ChatbotMessage } from '../models/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
 import { resolveReplyLanguage } from '../utils/detectMessageLanguage.js'
@@ -20,17 +20,44 @@ function chatBotTlsInsecureEnabled() {
   return isNgrokHost(process.env.CHAT_BOT_APP || '')
 }
 
-function chatBotFetchDispatcher() {
-  if (!chatBotTlsInsecureEnabled()) return undefined
+function chatBotTlsAgent() {
+  if (!chatBotTlsInsecureEnabled()) return null
   if (!_chatBotTlsAgent) {
-    _chatBotTlsAgent = new Agent({ connect: { rejectUnauthorized: false } })
+    _chatBotTlsAgent = new Agent({
+      connect: { rejectUnauthorized: false },
+      keepAliveTimeout: 60_000,
+      keepAliveMaxTimeout: 120_000,
+    })
   }
   return _chatBotTlsAgent
 }
 
+function chatBotAbortSignal(timeoutMs) {
+  const ms = Math.max(0, Number(timeoutMs) || 0)
+  if (!ms) return undefined
+  if (typeof AbortSignal.timeout === 'function') {
+    try {
+      return AbortSignal.timeout(ms)
+    } catch {
+      /* fall through */
+    }
+  }
+  const ac = new AbortController()
+  const timer = setTimeout(() => ac.abort(), ms)
+  if (typeof timer.unref === 'function') timer.unref()
+  return ac.signal
+}
+
 function chatBotFetch(url, init = {}) {
-  const dispatcher = chatBotFetchDispatcher()
-  return fetch(url, dispatcher ? { ...init, dispatcher } : init)
+  if (!url || typeof url !== 'string') {
+    return Promise.reject(new TypeError('Invalid chat bot URL'))
+  }
+  const agent = chatBotTlsAgent()
+  // Dùng undici.fetch + Agent cùng package — tránh UND_ERR_INVALID_ARG khi mix global fetch với Agent lệch version (Render).
+  if (agent) {
+    return undiciFetch(url, { ...init, dispatcher: agent })
+  }
+  return fetch(url, init)
 }
 
 const FLASK_MAX_HISTORY_TURNS = 3
@@ -52,7 +79,12 @@ function chatBotAppBaseUrl() {
 function chatBotStreamUrl() {
   const base = chatBotAppBaseUrl()
   if (!base) return ''
-  return `${base}/api/chat/stream`
+  try {
+    return new URL('/api/chat/stream', `${base}/`).href
+  } catch {
+    console.warn('[chatbot] Invalid CHAT_BOT_APP:', base)
+    return ''
+  }
 }
 
 function chatBotFetchErrorDetail(err) {
@@ -70,6 +102,9 @@ function chatBotUnavailableMessage(err) {
   const detail = chatBotFetchErrorDetail(err)
   if (/UNABLE_TO_VERIFY|certificate|CERT_/i.test(detail)) {
     return 'Lỗi SSL khi gọi ngrok từ Node. Đặt CHAT_BOT_TLS_INSECURE=1 trên Render/local (hoặc dùng URL ngrok — BE sẽ tự bật).'
+  }
+  if (/UND_ERR_INVALID_ARG/i.test(detail)) {
+    return 'Lỗi kết nối chat server (cấu hình HTTP client). Redeploy backend mới nhất và kiểm tra CHAT_BOT_APP chỉ là origin ngrok, không có dấu ngoặc/thừa khoảng trắng.'
   }
   if (/fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|AbortError/i.test(detail)) {
     return 'Không kết nối được chat server. Hãy chạy test.py (hoặc app_chatbot.py), bật ngrok và cập nhật URL mới vào CHAT_BOT_APP trong .env.'
@@ -145,7 +180,7 @@ async function openChatBotAppStream(message, history, replyLanguage) {
     method: 'POST',
     headers: flaskStreamHeaders(url),
     body: flaskChatPayload(message, history, replyLanguage),
-    signal: AbortSignal.timeout(300_000),
+    signal: chatBotAbortSignal(300_000),
   })
 }
 
