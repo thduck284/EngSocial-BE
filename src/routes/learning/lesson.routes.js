@@ -5,6 +5,7 @@ import { auth, requireModeratorOrAdmin } from '../../middlewares/index.js'
 const router = Router()
 
 router.get('/dashboard', lessonController.getDashboard)
+router.get('/topics', lessonController.getLessonTopics)
 router.get('/my-progress', auth, lessonController.getMyProgress)
 router.get('/user-progress/:targetUserId', auth, requireModeratorOrAdmin, lessonController.getUserProgressByMod)
 router.get('/history', auth, lessonController.getMyProgress)
