@@ -123,6 +123,33 @@ export const getDashboard = async (req, res, next) => {
 }
 
 /**
+ * Distinct lesson topics from published lessons in DB
+ * GET /api/lessons/topics?category=lesson&status=published&skill=reading
+ */
+export const getLessonTopics = async (req, res, next) => {
+  try {
+    const { skill, category = 'lesson', status = 'published' } = req.query
+
+    const filter = {
+      topic: { $exists: true, $nin: [null, ''] },
+    }
+    if (status && status !== 'all') filter.status = status
+    if (category && category !== 'all') filter.category = category
+    if (skill && skill !== 'all') filter.skill = skill
+
+    const topics = await Lesson.distinct('topic', filter)
+    const data = topics
+      .map((topic) => String(topic).trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+
+    return sendSuccess(res, { data }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
  * Get single lesson by id (admin or public) - full detail
  * GET /api/lessons/:id
  */
