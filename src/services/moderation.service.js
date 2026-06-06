@@ -44,16 +44,19 @@ export async function moderateText(text) {
 export async function checkAndThrowIfViolation(text, { threshold = 50 } = {}) {
   const result = await moderateText(text)
 
-  // Fail-closed: nếu API không khả dụng, chặn bài để an toàn
+  // AI không gọi được → bỏ qua kiểm duyệt, vẫn cho đăng bài
   if (!result) {
-    const err = new Error('MODERATION_UNAVAILABLE')
-    err.moderationResult = {
-      violationScore: 0,
-      level: 'none',
-      label: 'Không thể kiểm duyệt nội dung. Vui lòng thử lại sau.',
-      keywords: [],
+    return {
+      checked: false,
+      violated: false,
+      skipped: true,
+      result: {
+        violationScore: 0,
+        level: 'none',
+        label: 'Không vi phạm',
+        keywords: [],
+      },
     }
-    throw err
   }
 
   const aiKeywords = result.keywords || []
