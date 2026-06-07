@@ -45,7 +45,7 @@ function safeAttachmentFilename(name) {
 export const downloadPostDocument = async (req, res, next) => {
   try {
     const { postId, index } = req.params
-    const { url, name } = await communityService.getPostDocument(postId, index)
+    const { url, name } = await communityService.getPostDocument(postId, index, req.userId || null)
     const fetchRes = await fetch(url, { redirect: 'follow' })
     if (!fetchRes.ok) {
       return sendError(res, { statusCode: 502, messageKey: 'common.error', message: 'Failed to fetch document' }, req)
@@ -91,6 +91,7 @@ export const createPost = async (req, res, next) => {
         message: 'Nội dung bài viết vi phạm tiêu chuẩn cộng đồng.',
         data: {
           label:           mod.label        ?? 'Vi phạm',
+          level:           mod.level        ?? 'medium',
           violationScore:  mod.violationScore ?? 0,
           confidence:      mod.confidence     ?? 0,
           keywords:        mod.keywords      ?? [],
@@ -131,6 +132,7 @@ export const updatePost = async (req, res, next) => {
         message: 'Nội dung bài viết vi phạm tiêu chuẩn cộng đồng.',
         data: {
           label:          mod.label         ?? 'Vi phạm',
+          level:          mod.level         ?? 'medium',
           violationScore: mod.violationScore ?? 0,
           confidence:     mod.confidence     ?? 0,
           keywords:       mod.keywords       ?? [],
@@ -198,7 +200,7 @@ export const setReaction = async (req, res, next) => {
 
 export const getPostReactions = async (req, res, next) => {
   try {
-    const result = await communityService.getPostReactions(req.params.id)
+    const result = await communityService.getPostReactions(req.params.id, req.userId || null)
     return sendSuccess(res, {
       messageKey: 'community.reactionsSuccess',
       data: result,
@@ -300,7 +302,7 @@ export const deleteComment = async (req, res, next) => {
 
 export const getPostCommentUsers = async (req, res, next) => {
   try {
-    const users = await communityService.getPostCommentUsers(req.params.id)
+    const users = await communityService.getPostCommentUsers(req.params.id, req.userId || null)
     return sendSuccess(res, {
       messageKey: 'community.listSuccess',
       data: { users },
@@ -312,7 +314,7 @@ export const getPostCommentUsers = async (req, res, next) => {
 
 export const getPostShareUsers = async (req, res, next) => {
   try {
-    const users = await communityService.getPostShareUsers(req.params.id)
+    const users = await communityService.getPostShareUsers(req.params.id, req.userId || null)
     return sendSuccess(res, {
       messageKey: 'community.listSuccess',
       data: { users },

@@ -3,6 +3,7 @@ import { isUserOnline } from '../config/socket.js'
 import { Conversation, MessageBucket, ConversationSetting, Message, User } from '../models/index.js'
 import { bumpPeriodicQuestsOnOnlineTimeEvent } from './userPeriodicQuest.service.js'
 import { incrementChallengeProgressByRequirement } from './challenge.service.js'
+import { getBlockSets, isHiddenUser, hiddenUserObjectIds } from '../utils/blockFilter.js'
 
 /**
  * Get or create a direct conversation between current user and other user.
@@ -15,9 +16,12 @@ export const getOrCreateConversation = async (myId, otherUserId) => {
   if (!myIdObj || !otherId) throw new Error('USER_NOT_FOUND')
   if (myIdObj.equals(otherId)) throw new Error('CANNOT_CHAT_SELF')
 
-  const other = await User.findById(otherId).select('name avatar lastActiveDate').lean()
+  const other = await User.findById(otherId).select('name avatar lastActiveDate blockedUserIds').lean()
   if (!other) throw new Error('USER_NOT_FOUND')
   const otherIdStr = otherId.toString()
+
+  const { hiddenIds } = await getBlockSets(myId)
+  if (hiddenIds.has(otherIdStr)) throw new Error('USER_BLOCKED')
 
   const participants = [myIdObj, otherId].sort((a, b) => a.toString().localeCompare(b.toString()))
   let conversation = await Conversation.findOne({
@@ -195,6 +199,7 @@ export const getMyConversations = async (userId, options = {}) => {
   }
 
   let blockedSet = new Set()
+  const { hiddenIds } = await getBlockSets(userId)
   const me = await User.findById(userIdObj).select('blockedUserIds').lean()
   if (me?.blockedUserIds?.length) {
     blockedSet = new Set(me.blockedUserIds.map((b) => b.toString()))
@@ -230,14 +235,15 @@ export const getMyConversations = async (userId, options = {}) => {
         const allParticipantIds = (c.participants || []).map((p) => p.toString())
         const otherParticipantIds = allParticipantIds.filter((id) => id !== userIdObj.toString())
         const others = await User.find({ _id: { $in: c.participants } }).select('name avatar lastActiveDate').lean()
-        const participantNames = others.map((u) => u?.name || 'User').slice(0, 3)
-        const lastActiveDates = others.map((u) => u?.lastActiveDate).filter(Boolean)
+        const visibleOthers = others.filter((u) => !isHiddenUser(u._id, hiddenIds))
+        const participantNames = visibleOthers.map((u) => u?.name || 'User').slice(0, 3)
+        const lastActiveDates = visibleOthers.map((u) => u?.lastActiveDate).filter(Boolean)
         const groupLastActiveDate = lastActiveDates.length ? new Date(Math.max(...lastActiveDates.map((d) => new Date(d).getTime()))) : null
         const roles = (c.participantRoles || []).map((r) => ({ userId: r.userId?.toString(), role: r.role || 'user' }))
         const myRoleEntry = roles.find((r) => r.userId === userIdObj.toString())
         const myRole = myRoleEntry?.role || 'user'
         const roleOrder = { host: 0, admin: 1, user: 2 }
-        const members = others
+        const members = visibleOthers
           .map((u) => {
             const uid = u._id.toString()
             const roleEntry = roles.find((r) => r.userId === uid)
@@ -266,7 +272,7 @@ export const getMyConversations = async (userId, options = {}) => {
         const blockedIds = (c.blockedUserIds || []).map((b) => b.toString?.() ?? b)
         const blockedUsers = blockedIds.length > 0 ? await User.find({ _id: { $in: c.blockedUserIds } }).select('name avatar').lean() : []
         const blockedMembers = blockedUsers.map((u) => ({ userId: u._id.toString(), name: u?.name || 'User', avatar: u?.avatar || null }))
-        const hasOnlineMember = otherParticipantIds.some((id) => isUserOnline(id))
+        const hasOnlineMember = otherParticipantIds.some((id) => !hiddenIds.has(id) && isUserOnline(id))
         return {
           id: c._id.toString(),
           otherUserId: null,
@@ -278,7 +284,7 @@ export const getMyConversations = async (userId, options = {}) => {
           members,
           blockedMembers,
           maxMembers: c.maxMembers ?? GROUP_MAX_MEMBERS_DEFAULT,
-          memberCount: (c.participants || []).length,
+          memberCount: visibleOthers.length,
           groupPermissions,
           lastMessage: lastMessageText,
           lastMessageAt: lastMessageAtUser,
@@ -394,12 +400,16 @@ export const getMessages = async (conversationId, userId, opts = {}) => {
   const cutoff = bucket.deletedUpToCreatedAt ? new Date(bucket.deletedUpToCreatedAt) : null
   const deletedIds = (bucket.deletedMessageIds || []).filter(Boolean).map((id) => (mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id))
 
+  const { hiddenIds } = await getBlockSets(userId)
+  const excludeSenderIds = conv.type === 'group' ? hiddenUserObjectIds(hiddenIds) : []
+
   const notDeletedForEveryone = { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] }
   const baseFilter = {
     conversationId,
     ...notDeletedForEveryone,
     ...(deletedIds.length > 0 && { _id: { $nin: deletedIds } }),
     ...(cutoff && { createdAt: { $gt: cutoff } }),
+    ...(excludeSenderIds.length > 0 && { senderId: { $nin: excludeSenderIds } }),
   }
 
   let query = Message.find(baseFilter)
@@ -445,9 +455,8 @@ export const sendMessage = async (conversationId, senderId, content, attachments
   if (conv.type === 'direct') {
     const otherId = conv.participants.find((p) => p.toString() !== senderIdStr)?.toString()
     if (otherId) {
-      const me = await User.findById(senderId).select('blockedUserIds').lean()
-      const blockedSet = new Set((me?.blockedUserIds || []).map((b) => b.toString()))
-      if (blockedSet.has(otherId)) throw new Error('BLOCKED_BY_ME')
+      const { hiddenIds } = await getBlockSets(senderId)
+      if (hiddenIds.has(otherId)) throw new Error('BLOCKED_BY_ME')
     }
   }
 

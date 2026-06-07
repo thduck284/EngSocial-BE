@@ -1,7 +1,38 @@
 import { User, Friendship, UserSkillStats } from '../models/index.js'
 import * as achievementService from './achievement.service.js'
+import { getBlockSets, isHiddenUser, assertCanViewUserContent } from '../utils/blockFilter.js'
 
 const SKILL_LEVEL_NUM = { A1: 1, A2: 2, B1: 3, B2: 4, C1: 5, C2: 6 }
+
+const DEFAULT_PROFILE_PRIVACY = {
+  showEmail: true,
+  showPhone: true,
+  showAddress: true,
+  showDateOfBirth: true,
+  showGender: true,
+}
+
+function normalizeProfilePrivacy(raw) {
+  const p = raw || {}
+  return {
+    showEmail: p.showEmail !== false,
+    showPhone: p.showPhone !== false,
+    showAddress: p.showAddress !== false,
+    showDateOfBirth: p.showDateOfBirth !== false,
+    showGender: p.showGender !== false,
+  }
+}
+
+function maskProfileFieldsForViewer(user, privacy) {
+  const p = normalizeProfilePrivacy(privacy)
+  return {
+    email: p.showEmail ? user.email : undefined,
+    phone: p.showPhone ? user.phone : undefined,
+    address: p.showAddress ? user.address : undefined,
+    dateOfBirth: p.showDateOfBirth ? user.dateOfBirth : undefined,
+    gender: p.showGender ? user.gender : undefined,
+  }
+}
 
 /**
  * Get public profile of a user for viewing by another user.
@@ -13,16 +44,20 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
   }
 
   const user = await User.findById(targetUserId)
-    .select('name email avatar bio phone address dateOfBirth gender level xp totalXp createdAt profileSkills')
+    .select('name email avatar bio phone address dateOfBirth gender level xp totalXp createdAt profileSkills profilePrivacy')
     .lean()
 
   if (!user) return null
 
   const targetId = user._id.toString()
 
-  // Check if current user has blocked this profile user
-  const currentUserDoc = await User.findById(currentUserId).select('blockedUserIds').lean()
-  const blockedByMe = (currentUserDoc?.blockedUserIds || []).some((b) => b.toString() === targetId)
+  try {
+    await assertCanViewUserContent(currentUserId, targetId, 'USER_NOT_FOUND')
+  } catch {
+    return null
+  }
+  const { hiddenIds } = await getBlockSets(currentUserId)
+  const blockedByMe = false
 
   // Friendship between current user and target
   const friendship = await Friendship.findOne({
@@ -76,10 +111,11 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
   })
   let mutualFriendsCount = mutualFriends.length
 
-  // Fetch mutual friend details (first 10)
+  // Fetch mutual friend details (first 10), exclude blocked users
   const mutualFriendsList = []
   if (mutualFriends.length > 0) {
-    const details = await User.find({ _id: { $in: mutualFriends.slice(0, 20) } })
+    const visibleMutualIds = mutualFriends.filter((id) => !isHiddenUser(id, hiddenIds)).slice(0, 20)
+    const details = await User.find({ _id: { $in: visibleMutualIds } })
       .select('name avatar level')
       .lean()
     details.forEach(u => {
@@ -91,6 +127,7 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
       })
     })
   }
+  mutualFriendsCount = mutualFriends.filter((id) => !isHiddenUser(id, hiddenIds)).length
 
   // First 6 friends of target (for preview)
   const friendDocs = await Friendship.find({
@@ -102,14 +139,16 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
     .limit(6)
     .lean()
 
-  const friends = friendDocs.map((f) => {
-    const u = f.userId._id.toString() === targetId ? f.friendId : f.userId
-    return {
-      id: u._id.toString(),
-      name: u.name,
-      avatar: u.avatar,
-    }
-  })
+  const friends = friendDocs
+    .map((f) => {
+      const u = f.userId._id.toString() === targetId ? f.friendId : f.userId
+      return {
+        id: u._id.toString(),
+        name: u.name,
+        avatar: u.avatar,
+      }
+    })
+    .filter((f) => !isHiddenUser(f.id, hiddenIds))
 
   // Skill stats (reading, listening, writing) for "My skills" block
   const skillStatsDocs = await UserSkillStats.find({ userId: targetId }).lean()
@@ -169,16 +208,18 @@ export const getPublicProfile = async (currentUserId, targetUserId) => {
     )
   )
 
+  const masked = maskProfileFieldsForViewer(user, user.profilePrivacy)
+
   return {
     id: targetId,
     name: user.name,
-    email: user.email,
+    email: masked.email,
     avatar: user.avatar,
     bio: user.bio,
-    phone: user.phone,
-    address: user.address,
-    dateOfBirth: user.dateOfBirth,
-    gender: user.gender,
+    phone: masked.phone,
+    address: masked.address,
+    dateOfBirth: masked.dateOfBirth,
+    gender: masked.gender,
     level: user.level ?? 1,
     xp: user.xp ?? 0,
     totalXp: user.totalXp ?? 0,
@@ -291,8 +332,7 @@ export const updateMySkillProfile = async (userId, payload) => {
 }
 
 /**
- * Chặn user (chat 1-1): thêm targetUserId vào blockedUserIds của current user.
- * Không thể chặn chính mình.
+ * Chặn user: thêm vào blockedUserIds và xóa quan hệ bạn bè (accepted/pending).
  */
 export const blockUser = async (currentUserId, targetUserId) => {
   if (currentUserId === targetUserId) throw new Error('CANNOT_BLOCK_SELF')
@@ -301,9 +341,16 @@ export const blockUser = async (currentUserId, targetUserId) => {
   const targetObj = await User.findById(targetUserId).select('_id').lean()
   if (!targetObj) throw new Error('TARGET_USER_NOT_FOUND')
   const blocked = (currentObj.blockedUserIds || []).map((b) => b.toString())
-  if (blocked.includes(targetUserId)) return { blocked: true }
-  await User.findByIdAndUpdate(currentUserId, {
-    $addToSet: { blockedUserIds: targetObj._id },
+  if (!blocked.includes(targetUserId)) {
+    await User.findByIdAndUpdate(currentUserId, {
+      $addToSet: { blockedUserIds: targetObj._id },
+    })
+  }
+  await Friendship.deleteMany({
+    $or: [
+      { userId: currentUserId, friendId: targetUserId },
+      { userId: targetUserId, friendId: currentUserId },
+    ],
   })
   return { blocked: true }
 }

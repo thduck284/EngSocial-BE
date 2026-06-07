@@ -4,7 +4,8 @@ import { getMessage } from '../locales/messages.js'
 const SMTP_HOST = process.env.SMTP_HOST
 const SMTP_PORT = parseInt(process.env.SMTP_PORT || '587', 10)
 const SMTP_FROM = process.env.SMTP_FROM
-const SMTP_PASS = process.env.SMTP_PASS
+const SMTP_PASS = (process.env.SMTP_PASS || '').replace(/\s+/g, '')
+const SMTP_TLS_INSECURE = process.env.SMTP_TLS_INSECURE === '1'
 
 const hasSmtpConfig = SMTP_HOST && SMTP_FROM && SMTP_PASS
 
@@ -18,6 +19,7 @@ if (hasSmtpConfig) {
       user: SMTP_FROM,
       pass: SMTP_PASS,
     },
+    ...(SMTP_TLS_INSECURE ? { tls: { rejectUnauthorized: false } } : {}),
   })
 }
 
@@ -221,6 +223,11 @@ export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_chan
     intro = lang === 'en'
       ? `Your OTP code to permanently delete your account is:`
       : `Mã OTP để xác nhận xóa vĩnh viễn tài khoản của bạn là:`
+  } else if (type === 'password_change') {
+    subject = lang === 'en' ? 'EngSocial — Verify Password Change' : 'EngSocial — Xác minh đổi mật khẩu'
+    intro = lang === 'en'
+      ? `Your OTP code to change your password is:`
+      : `Mã OTP để xác nhận đổi mật khẩu của bạn là:`
   } else {
     subject = lang === 'en' ? 'EngSocial — Verify Email Change' : 'EngSocial — Xác minh đổi Email'
     intro = lang === 'en'
@@ -236,7 +243,8 @@ export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_chan
     return
   }
 
-  await transporter.sendMail({
+  try {
+    await transporter.sendMail({
     from: `"EngSocial" <${SMTP_FROM}>`,
     to: toEmail,
     subject,
@@ -265,6 +273,13 @@ export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_chan
   </table>
 </body>
 </html>`.trim(),
-  })
+    })
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[email] Gửi OTP thất bại:', err.message)
+    // eslint-disable-next-line no-console
+    console.log(`[email] OTP (fallback log) for ${toEmail}: ${otp}`)
+    throw err
+  }
 }
 

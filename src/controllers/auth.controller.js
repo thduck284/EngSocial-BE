@@ -310,9 +310,88 @@ export const resetPassword = async (req, res, next) => {
  */
 export const changePassword = async (req, res, next) => {
   try {
-    const { currentPassword, newPassword } = req.body
-    await authService.changePassword(req.userId, { currentPassword, newPassword })
+    const { currentPassword, otp, newPassword } = req.body
+    await authService.changePassword(req.userId, { currentPassword, otp, newPassword })
     return sendSuccess(res, { messageKey: 'user.passwordChanged' }, req)
+  } catch (error) {
+    if (error.message === 'WRONG_PASSWORD') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.wrongPassword' }, req)
+    }
+    if (error.message === 'OTP_INVALID') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.otpInvalid' }, req)
+    }
+    if (error.message === 'OTP_EXPIRED') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.otpExpired' }, req)
+    }
+    if (error.message === 'OTP_NOT_VERIFIED') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.otpNotVerified' }, req)
+    }
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Request password change OTP
+ * POST /api/user/change-password/request
+ */
+export const requestPasswordChange = async (req, res, next) => {
+  try {
+    const lang = req.language || 'vi'
+    const result = await authService.requestPasswordChangeOtp(req.userId, lang)
+    return sendSuccess(res, {
+      messageKey: 'user.passwordOtpSent',
+      data: { cooldownSec: result.cooldownSec },
+    }, req)
+  } catch (error) {
+    if (error.message === 'OTP_COOLDOWN') {
+      return sendError(res, {
+        statusCode: 429,
+        messageKey: 'user.otpCooldown',
+        data: { waitSec: error.waitSec },
+      }, req)
+    }
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Verify password change OTP (before setting new password)
+ * POST /api/user/change-password/verify
+ */
+export const verifyPasswordChange = async (req, res, next) => {
+  try {
+    const { otp } = req.body
+    await authService.verifyPasswordChangeOtp(req.userId, otp)
+    return sendSuccess(res, { messageKey: 'user.otpVerified' }, req)
+  } catch (error) {
+    if (error.message === 'OTP_INVALID') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.otpInvalid' }, req)
+    }
+    if (error.message === 'OTP_EXPIRED') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.otpExpired' }, req)
+    }
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Verify password before email change
+ * POST /api/user/change-email/verify-password
+ */
+export const verifyEmailChangePassword = async (req, res, next) => {
+  try {
+    const { currentPassword } = req.body
+    await authService.verifyEmailChangePassword(req.userId, currentPassword)
+    return sendSuccess(res, { messageKey: 'user.emailPasswordVerified' }, req)
   } catch (error) {
     if (error.message === 'WRONG_PASSWORD') {
       return sendError(res, { statusCode: 400, messageKey: 'user.wrongPassword' }, req)
@@ -337,6 +416,9 @@ export const requestEmailChange = async (req, res, next) => {
   } catch (error) {
     if (error.message === 'EMAIL_EXISTS') {
       return sendError(res, { statusCode: 409, messageKey: 'auth.emailExists' }, req)
+    }
+    if (error.message === 'PASSWORD_NOT_VERIFIED') {
+      return sendError(res, { statusCode: 400, messageKey: 'user.emailPasswordRequired' }, req)
     }
     next(error)
   }

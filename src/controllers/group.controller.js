@@ -107,7 +107,11 @@ export const leaveGroup = async (req, res, next) => {
 export const getMembers = async (req, res, next) => {
   try {
     const { page, limit } = req.query
-    const result = await groupService.getGroupMembers(req.params.id, { page, limit })
+    const result = await groupService.getGroupMembers(req.params.id, {
+      page,
+      limit,
+      viewerId: req.userId || null,
+    })
     return sendPaginated(res, {
       messageKey: 'group.membersSuccess',
       data: result.members,
