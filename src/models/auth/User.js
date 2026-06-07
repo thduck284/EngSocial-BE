@@ -136,6 +136,14 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  /** Quyền riêng tư thông tin cá nhân trên trang profile công khai */
+  profilePrivacy: {
+    showEmail: { type: Boolean, default: true },
+    showPhone: { type: Boolean, default: true },
+    showAddress: { type: Boolean, default: true },
+    showDateOfBirth: { type: Boolean, default: true },
+    showGender: { type: Boolean, default: true },
+  },
   /** Danh sách user bị mình chặn (chat 1-1: không nhận tin từ họ, họ vẫn thấy mình đã chặn) */
   blockedUserIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   // Custom profile tab: My Skills (self-assessment)

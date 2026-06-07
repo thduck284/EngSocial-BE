@@ -23,6 +23,9 @@ export const getOrCreateWithUser = async (req, res, next) => {
     if (error.message === 'USER_NOT_FOUND') {
       return sendError(res, { statusCode: 404, messageKey: 'auth.userNotFound' }, req)
     }
+    if (error.message === 'USER_BLOCKED') {
+      return sendError(res, { statusCode: 403, messageKey: 'friend.blocked' }, req)
+    }
     next(error)
   }
 }

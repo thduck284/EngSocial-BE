@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import * as groupController from '../../controllers/group.controller.js'
-import { auth } from '../../middlewares/auth.middleware.js'
+import { auth, optionalAuth } from '../../middlewares/auth.middleware.js'
 
 const router = Router()
 
@@ -19,6 +19,6 @@ router.post('/:id/invite/accept', auth, groupController.acceptGroupInvite)
 router.post('/:id/invite/decline', auth, groupController.declineGroupInvite)
 router.delete('/:id/members/:userId', auth, groupController.removeMember)
 router.post('/:id/members', auth, groupController.addMembers)
-router.get('/:id/members', groupController.getMembers)
+router.get('/:id/members', optionalAuth, groupController.getMembers)
 
 export default router

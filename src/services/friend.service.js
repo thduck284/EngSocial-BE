@@ -6,6 +6,7 @@ import { incrementPeriodicQuestsForCategory } from './userPeriodicQuest.service.
 import { isElasticsearchEnabled } from '../config/elasticsearch/client.js'
 import { searchUserIds } from '../config/elasticsearch/userSearch.service.js'
 import { isUserOnline } from '../config/socket.js'
+import { getBlockSets, isHiddenUser, hiddenUserObjectIds } from '../utils/blockFilter.js'
 
 /**
  * Send friend request
@@ -15,6 +16,9 @@ export const sendFriendRequest = async (userId, friendId) => {
 
   const friend = await User.findById(friendId)
   if (!friend) throw new Error('USER_NOT_FOUND')
+
+  const { hiddenIds } = await getBlockSets(userId)
+  if (isHiddenUser(friendId, hiddenIds)) throw new Error('USER_BLOCKED')
 
   // Check existing friendship in both directions
   const existing = await Friendship.findOne({
@@ -93,10 +97,18 @@ export const removeFriend = async (userId, friendId) => {
  */
 export const getFriends = async (userId, { page = 1, limit = 20 }) => {
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
+  const { hiddenIds } = await getBlockSets(userId)
+  const excludeIds = hiddenUserObjectIds(hiddenIds)
 
   const filter = {
     $or: [{ userId }, { friendId: userId }],
     status: 'accepted',
+  }
+  if (excludeIds.length) {
+    filter.$and = [
+      { userId: { $nin: excludeIds } },
+      { friendId: { $nin: excludeIds } },
+    ]
   }
   const total = await Friendship.countDocuments(filter)
   const friendships = await Friendship.find(filter)
@@ -132,7 +144,10 @@ export const getFriends = async (userId, { page = 1, limit = 20 }) => {
  */
 export const getPendingRequests = async (userId, { page = 1, limit = 20 }) => {
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
+  const { hiddenIds } = await getBlockSets(userId)
+  const excludeIds = hiddenUserObjectIds(hiddenIds)
   const filter = { friendId: userId, status: 'pending' }
+  if (excludeIds.length) filter.userId = { $nin: excludeIds }
   const total = await Friendship.countDocuments(filter)
   const requests = await Friendship.find(filter)
     .populate('userId', 'name avatar level totalXp')
@@ -160,7 +175,10 @@ export const getPendingRequests = async (userId, { page = 1, limit = 20 }) => {
  */
 export const getSentRequests = async (userId, { page = 1, limit = 20 }) => {
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
+  const { hiddenIds } = await getBlockSets(userId)
+  const excludeIds = hiddenUserObjectIds(hiddenIds)
   const filter = { userId, status: 'pending' }
+  if (excludeIds.length) filter.friendId = { $nin: excludeIds }
   const total = await Friendship.countDocuments(filter)
   const requests = await Friendship.find(filter)
     .populate('friendId', 'name avatar level totalXp')
@@ -193,6 +211,7 @@ export const getSentRequests = async (userId, { page = 1, limit = 20 }) => {
 export const searchUsersForFriends = async (currentUserId, { q = '', page = 1, limit = 20, friendFilter = 'all' }) => {
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
   const trimmedQ = (q || '').trim()
+  const { hiddenIds } = await getBlockSets(currentUserId)
 
   let userIdsFilter = null
   if (friendFilter === 'connected') {
@@ -231,7 +250,7 @@ export const searchUsersForFriends = async (currentUserId, { q = '', page = 1, l
     try {
       const { ids: esIds, total: esTotal } = await searchUserIds(trimmedQ, { from: 0, size: 500 })
       let filteredIds = esIds.filter(
-        (id) => id !== currentUserId && (setFilter === null || setFilter.has(id))
+        (id) => id !== currentUserId && !hiddenIds.has(id) && (setFilter === null || setFilter.has(id))
       )
       const total = filteredIds.length
       const pageIds = filteredIds.slice(skip, skip + perPage)
@@ -290,10 +309,13 @@ export const searchUsersForFriends = async (currentUserId, { q = '', page = 1, l
   }
 
   const userQuery = {}
+  const excludeIds = hiddenUserObjectIds(hiddenIds)
   if (userIdsFilter?.length) {
-    userQuery._id = { $in: userIdsFilter.map((id) => new mongoose.Types.ObjectId(id)) }
+    const visibleIds = userIdsFilter.filter((id) => !hiddenIds.has(String(id)))
+    userQuery._id = { $in: visibleIds.map((id) => new mongoose.Types.ObjectId(id)) }
   } else {
     userQuery._id = { $ne: new mongoose.Types.ObjectId(currentUserId) }
+    if (excludeIds.length) userQuery._id.$nin = excludeIds
   }
   if (trimmedQ) {
     userQuery.name = { $regex: trimmedQ, $options: 'i' }
@@ -377,11 +399,20 @@ export const getFriendSuggestions = async (currentUserId, { limit = 10 }) => {
   const usersWhoBlockedMe = await User.find({ blockedUserIds: currentId }).select('_id').lean()
   const usersWhoBlockedMeIds = usersWhoBlockedMe.map(u => new mongoose.Types.ObjectId(u._id.toString()))
 
+  const pendingFriendships = await Friendship.find({
+    $or: [{ userId: currentId }, { friendId: currentId }],
+    status: 'pending',
+  }).lean()
+  const pendingUserIds = pendingFriendships.map((f) =>
+    f.userId.toString() === currentUserId ? f.friendId : f.userId
+  )
+
   const allExcludedIds = [
     currentId,
     ...myFriendIds.map(id => new mongoose.Types.ObjectId(id.toString())),
     ...myBlockedIds,
-    ...usersWhoBlockedMeIds
+    ...usersWhoBlockedMeIds,
+    ...pendingUserIds.map((id) => new mongoose.Types.ObjectId(id.toString())),
   ]
 
   // 2. Get all friendships of my friends (second degree)
@@ -449,25 +480,9 @@ export const getFriendSuggestions = async (currentUserId, { limit = 10 }) => {
     }))
   }
 
-  // 3. Filter out users who have pending requests with me
-  const suggestionIds = rawSuggestions.map(s => s._id)
-  const pendingFriendships = await Friendship.find({
-    $or: [
-      { userId: currentId, friendId: { $in: suggestionIds } },
-      { friendId: currentId, userId: { $in: suggestionIds } },
-    ],
-    status: 'pending',
-  }).lean()
+  // 3. Populate user info (pending users already excluded via allExcludedIds)
+  const filteredSuggestions = rawSuggestions.slice(0, Number(limit))
 
-  const pendingIds = new Set(pendingFriendships.map(f =>
-    f.userId.toString() === currentUserId ? f.friendId.toString() : f.userId.toString()
-  ))
-
-  const filteredSuggestions = rawSuggestions
-    .filter(s => !pendingIds.has(s._id.toString()))
-    .slice(0, Number(limit))
-
-  // 4. Populate user info
   const finalUserIds = filteredSuggestions.map(s => s._id)
   const users = await User.find({ _id: { $in: finalUserIds } })
     .select('name avatar level totalXp')

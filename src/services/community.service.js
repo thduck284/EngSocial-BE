@@ -6,6 +6,16 @@ import * as notificationService from './notification.service.js'
 import { incrementPeriodicQuestsForCategory } from './userPeriodicQuest.service.js'
 import { emitToUser } from '../config/socket.js'
 import { checkAndThrowIfViolation } from './moderation.service.js'
+import { getBlockSets, hiddenUserObjectIds, isHiddenUser, assertCanViewUserContent, filterHiddenById } from '../utils/blockFilter.js'
+
+async function assertPostVisibleToViewer(postId, viewerId) {
+  const post = await Post.findById(postId).select('authorId status').lean()
+  if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
+  if (viewerId) {
+    await assertCanViewUserContent(viewerId, post.authorId, 'POST_NOT_FOUND')
+  }
+  return post
+}
 
 /** Extract unique hashtag strings from content (without #) */
 function extractHashtags(content) {
@@ -180,6 +190,19 @@ export const getPosts = async ({ visibility, groupId, authorId, search, page = 1
   const isViewingOthers = authorId && viewerId && String(authorId) !== String(viewerId)
   const currentYearStart = new Date(new Date().getFullYear(), 0, 1)
 
+  const { skip, limit: perPage } = getPaginationQuery({ page, limit })
+
+  if (isViewingOthers) {
+    try {
+      await assertCanViewUserContent(viewerId, authorId, 'POST_NOT_FOUND')
+    } catch (e) {
+      if (e.message === 'POST_NOT_FOUND') {
+        return { posts: [], pagination: getPagination({ page, limit: perPage, total: 0 }) }
+      }
+      throw e
+    }
+  }
+
   // 1. Base Visibility Filtering
   if (isViewingOthers) {
     queryFilter.visibility = 'public'
@@ -204,8 +227,6 @@ export const getPosts = async ({ visibility, groupId, authorId, search, page = 1
       queryFilter.visibility = 'public'
     }
   }
-
-  const { skip, limit: perPage } = getPaginationQuery({ page, limit })
 
   // 2. Following Tab logic
   if (tab === 'following' && viewerId) {
@@ -234,6 +255,14 @@ export const getPosts = async ({ visibility, groupId, authorId, search, page = 1
   }
 
   if (search) queryFilter.$text = { $search: search }
+
+  if (viewerId) {
+    const { hiddenIds } = await getBlockSets(viewerId)
+    const excludeAuthorIds = hiddenUserObjectIds(hiddenIds)
+    if (excludeAuthorIds.length) {
+      queryFilter.$and = (queryFilter.$and || []).concat([{ authorId: { $nin: excludeAuthorIds } }])
+    }
+  }
 
   const total = await Post.countDocuments(queryFilter)
 
@@ -347,6 +376,7 @@ export const getPosts = async ({ visibility, groupId, authorId, search, page = 1
  * Get single post detail. Optionally include liked for viewerId.
  */
 export const getPostById = async (postId, viewerId = null) => {
+  await assertPostVisibleToViewer(postId, viewerId)
   const post = await Post.findById(postId)
     .populate('authorId', 'name avatar level totalXp')
     .populate('groupId', 'name icon type')
@@ -374,7 +404,8 @@ export const getPostById = async (postId, viewerId = null) => {
 /**
  * Get document url and name for a post at given index (for download proxy).
  */
-export const getPostDocument = async (postId, index) => {
+export const getPostDocument = async (postId, index, viewerId = null) => {
+  await assertPostVisibleToViewer(postId, viewerId)
   const post = await Post.findById(postId)
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
   const docs = normalizeDocuments(post.documents || [])
@@ -539,6 +570,7 @@ async function getReactionCountsForPost(postId) {
 }
 
 export const setReaction = async (userId, postId, reaction, io = null) => {
+  await assertPostVisibleToViewer(postId, userId)
   const post = await Post.findById(postId)
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
 
@@ -578,6 +610,7 @@ export const setReaction = async (userId, postId, reaction, io = null) => {
  * Like/Unlike a post (legacy endpoint: toggles "like"). Prefer setReaction for 6 reaction types.
  */
 export const toggleLike = async (userId, postId, io = null) => {
+  await assertPostVisibleToViewer(postId, userId)
   const existing = await Reaction.findOne({ targetType: 'post', targetId: postId, userId })
   if (existing) {
     if (existing.reaction === 'like') {
@@ -611,7 +644,8 @@ export const checkLiked = async (userId, postId) => {
  * Get list of reactions for a post (for modal: who reacted and with which type).
  * Returns reactionCounts and reactions array with user info.
  */
-export const getPostReactions = async (postId) => {
+export const getPostReactions = async (postId, viewerId = null) => {
+  await assertPostVisibleToViewer(postId, viewerId)
   const post = await Post.findById(postId).select('_id status').lean()
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
   const raw = await Reaction.find({ targetType: 'post', targetId: postId })
@@ -629,6 +663,13 @@ export const getPostReactions = async (postId) => {
     avatar: r.userId?.avatar,
     reaction: r.reaction,
   }))
+  if (viewerId) {
+    const { hiddenIds } = await getBlockSets(viewerId)
+    return {
+      reactionCounts,
+      reactions: filterHiddenById(reactions, (r) => r.userId, hiddenIds),
+    }
+  }
   return { reactionCounts, reactions }
 }
 
@@ -661,10 +702,16 @@ export const getCommentReactions = async (commentId) => {
  * Get comments for a post
  */
 export const getComments = async (postId, { parentId, page = 1, limit = 20, viewerId = null }) => {
+  await assertPostVisibleToViewer(postId, viewerId)
   const filter = { postId, status: 'active' }
   if (parentId) {
     // Chỉ lấy reply trực tiếp của một comment cụ thể
     filter.parentId = parentId
+  }
+  if (viewerId) {
+    const { hiddenIds } = await getBlockSets(viewerId)
+    const excludeAuthorIds = hiddenUserObjectIds(hiddenIds)
+    if (excludeAuthorIds.length) filter.authorId = { $nin: excludeAuthorIds }
   }
 
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
@@ -760,6 +807,7 @@ export const setCommentReaction = async (userId, commentId, reaction, io = null)
  * Create a comment
  */
 export const createComment = async (userId, postId, { content, parentId, images, video, audio, documents } = {}, io = null) => {
+  await assertPostVisibleToViewer(postId, userId)
   const post = await Post.findById(postId)
   if (!post || post.status === 'deleted') throw new Error('POST_NOT_FOUND')
 
@@ -836,7 +884,8 @@ export const deleteComment = async (userId, commentId) => {
 /**
  * Get list of unique users who commented on a post
  */
-export const getPostCommentUsers = async (postId) => {
+export const getPostCommentUsers = async (postId, viewerId = null) => {
+  await assertPostVisibleToViewer(postId, viewerId)
   const comments = await Comment.find({ postId, status: 'active' })
     .select('authorId')
     .populate('authorId', 'name avatar')
@@ -856,13 +905,18 @@ export const getPostCommentUsers = async (postId) => {
       })
     }
   })
+  if (viewerId) {
+    const { hiddenIds } = await getBlockSets(viewerId)
+    return filterHiddenById(users, (u) => u.userId, hiddenIds)
+  }
   return users
 }
 
 /**
  * Get list of unique users who shared a post
  */
-export const getPostShareUsers = async (postId) => {
+export const getPostShareUsers = async (postId, viewerId = null) => {
+  await assertPostVisibleToViewer(postId, viewerId)
   const posts = await Post.find({ sharedPostId: postId, status: 'active' })
     .select('authorId')
     .populate('authorId', 'name avatar')
@@ -882,5 +936,9 @@ export const getPostShareUsers = async (postId) => {
       })
     }
   })
+  if (viewerId) {
+    const { hiddenIds } = await getBlockSets(viewerId)
+    return filterHiddenById(users, (u) => u.userId, hiddenIds)
+  }
   return users
 }

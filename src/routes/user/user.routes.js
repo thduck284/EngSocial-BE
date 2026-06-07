@@ -4,7 +4,7 @@ import * as authController from '../../controllers/auth.controller.js'
 import { auth } from '../../middlewares/auth.middleware.js'
 import { validate } from '../../middlewares/validate.middleware.js'
 import { uploadAvatar as uploadAvatarMw } from '../../middlewares/upload.middleware.js'
-import { updateProfileSchema, updateSkillProfileSchema, changePasswordSchema, requestEmailChangeSchema, confirmEmailChangeSchema, confirmOtpSchema } from '../../validators/user.validator.js'
+import { updateProfileSchema, updateSkillProfileSchema, changePasswordSchema, verifyPasswordChangeOtpSchema, requestEmailChangeSchema, verifyEmailChangePasswordSchema, confirmEmailChangeSchema, confirmOtpSchema } from '../../validators/user.validator.js'
 
 const router = Router()
 
@@ -72,10 +72,31 @@ router.delete('/block/:userId', auth, userController.unblockUser)
 
 /**
  * @route   POST /api/user/change-password
- * @desc    Change password (requires currentPassword + newPassword)
+ * @desc    Change password (currentPassword + newPassword, or otp + newPassword)
  * @access  Private
  */
 router.post('/change-password', auth, validate(changePasswordSchema), authController.changePassword)
+
+/**
+ * @route   POST /api/user/change-password/request
+ * @desc    Send OTP to user email to confirm password change
+ * @access  Private
+ */
+router.post('/change-password/request', auth, authController.requestPasswordChange)
+
+/**
+ * @route   POST /api/user/change-password/verify
+ * @desc    Verify OTP before setting new password
+ * @access  Private
+ */
+router.post('/change-password/verify', auth, validate(verifyPasswordChangeOtpSchema), authController.verifyPasswordChange)
+
+/**
+ * @route   POST /api/user/change-email/verify-password
+ * @desc    Verify current password before email change
+ * @access  Private
+ */
+router.post('/change-email/verify-password', auth, validate(verifyEmailChangePasswordSchema), authController.verifyEmailChangePassword)
 
 /**
  * @route   POST /api/user/change-email/request

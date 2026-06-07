@@ -26,6 +26,13 @@ export class UserDTO extends BaseDTO {
       status: user.status,
       provider: user.provider,
       emailVerified: user.emailVerified,
+      profilePrivacy: user.profilePrivacy || {
+        showEmail: true,
+        showPhone: true,
+        showAddress: true,
+        showDateOfBirth: true,
+        showGender: true,
+      },
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     })

@@ -2,6 +2,7 @@ import { Group, GroupMember, User } from '../models/index.js'
 import { GroupDTO, GroupMemberDTO } from '../dto/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
 import { generateUniqueSlug } from '../utils/slug.js'
+import { getBlockSets, isHiddenUser, hiddenUserObjectIds } from '../utils/blockFilter.js'
 import * as notificationService from './notification.service.js'
 import { emitToUser } from '../config/socket.js'
 
@@ -254,12 +255,18 @@ export const removeMemberFromGroup = async (actorUserId, groupId, targetUserId) 
 }
 
 /**
- * Get group members
+ * Get group members. When viewerId is set, hide users blocked by/with viewer.
  */
-export const getGroupMembers = async (groupId, { page = 1, limit = 20 }) => {
+export const getGroupMembers = async (groupId, { page = 1, limit = 20, viewerId = null } = {}) => {
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
-  const total = await GroupMember.countDocuments({ groupId, status: 'active' })
-  const members = await GroupMember.find({ groupId, status: 'active' })
+  const filter = { groupId, status: 'active' }
+  if (viewerId) {
+    const { hiddenIds } = await getBlockSets(viewerId)
+    const excludeIds = hiddenUserObjectIds(hiddenIds)
+    if (excludeIds.length) filter.userId = { $nin: excludeIds }
+  }
+  const total = await GroupMember.countDocuments(filter)
+  const members = await GroupMember.find(filter)
     .populate('userId', 'name avatar level totalXp')
     .sort({ joinedAt: 1 })
     .skip(skip)
@@ -321,17 +328,20 @@ export const getGroupJoinRequests = async (actorUserId, groupId) => {
 
   const invitedPendingUserIds = invitedPending.map((row) => row.userId.toString())
 
-  const joinRequests = selfPending.map((m) => ({
-    ...new GroupMemberDTO(m),
-    user: m.userId
-      ? {
-          id: m.userId._id,
-          name: m.userId.name,
-          avatar: m.userId.avatar,
-          level: m.userId.level,
-        }
-      : null,
-  }))
+  const { hiddenIds } = await getBlockSets(actorUserId)
+  const joinRequests = selfPending
+    .filter((m) => !isHiddenUser(m.userId?._id || m.userId, hiddenIds))
+    .map((m) => ({
+      ...new GroupMemberDTO(m),
+      user: m.userId
+        ? {
+            id: m.userId._id,
+            name: m.userId.name,
+            avatar: m.userId.avatar,
+            level: m.userId.level,
+          }
+        : null,
+    }))
 
   return { joinRequests, invitedPendingUserIds }
 }

@@ -58,6 +58,14 @@ export const updateProfileSchema = Joi.object({
     .messages({
       'string.max': 'Avatar URL không được quá 2000 ký tự',
     }),
+
+  profilePrivacy: Joi.object({
+    showEmail: Joi.boolean(),
+    showPhone: Joi.boolean(),
+    showAddress: Joi.boolean(),
+    showDateOfBirth: Joi.boolean(),
+    showGender: Joi.boolean(),
+  }).optional(),
 }).min(1).messages({
   'object.min': 'Cần ít nhất một trường để cập nhật',
 })
@@ -72,12 +80,23 @@ export const updateSkillProfileSchema = Joi.object({
 })
 
 export const changePasswordSchema = Joi.object({
-  currentPassword: Joi.string().required().messages({
-    'any.required': 'Mật khẩu hiện tại là bắt buộc',
+  currentPassword: Joi.string().messages({
+    'string.empty': 'Mật khẩu hiện tại là bắt buộc',
+  }),
+  otp: Joi.string().length(6).messages({
+    'string.length': 'OTP phải gồm 6 ký tự',
+    'string.empty': 'OTP là bắt buộc',
   }),
   newPassword: Joi.string().min(8).required().messages({
     'string.min': 'Mật khẩu mới phải có ít nhất 8 ký tự',
     'any.required': 'Mật khẩu mới là bắt buộc',
+  }),
+}).xor('currentPassword', 'otp')
+
+export const verifyPasswordChangeOtpSchema = Joi.object({
+  otp: Joi.string().length(6).required().messages({
+    'string.length': 'OTP phải gồm 6 ký tự',
+    'any.required': 'OTP là bắt buộc',
   }),
 })
 
@@ -85,6 +104,12 @@ export const requestEmailChangeSchema = Joi.object({
   newEmail: Joi.string().email().required().messages({
     'string.email': 'Email không hợp lệ',
     'any.required': 'Email mới là bắt buộc',
+  }),
+})
+
+export const verifyEmailChangePasswordSchema = Joi.object({
+  currentPassword: Joi.string().required().messages({
+    'any.required': 'Mật khẩu hiện tại là bắt buộc',
   }),
 })
 

@@ -420,6 +420,16 @@ export const updateUserProfile = async (userId, updates) => {
     user.avatar = updates.avatar === '' ? undefined : updates.avatar
     user.markModified('avatar')
   }
+  if (updates.profilePrivacy !== undefined && typeof updates.profilePrivacy === 'object') {
+    if (!user.profilePrivacy) user.profilePrivacy = {}
+    const keys = ['showEmail', 'showPhone', 'showAddress', 'showDateOfBirth', 'showGender']
+    keys.forEach((key) => {
+      if (updates.profilePrivacy[key] !== undefined) {
+        user.profilePrivacy[key] = Boolean(updates.profilePrivacy[key])
+      }
+    })
+    user.markModified('profilePrivacy')
+  }
 
   await user.save()
   const updated = await User.findById(userId)
@@ -490,29 +500,119 @@ export const resetPassword = async ({ token, newPassword }) => {
   return { ok: true }
 }
 
+// In-memory OTP store for password change (TTL 10 minutes).
+const passwordChangeOtps = new Map()
+const PASSWORD_OTP_COOLDOWN_MS = 60 * 1000
+
+function assertPasswordOtpRecord(userId, otp) {
+  const record = passwordChangeOtps.get(userId)
+  if (!record) throw new Error('OTP_INVALID')
+  if (Date.now() > record.expiresAt) {
+    passwordChangeOtps.delete(userId)
+    throw new Error('OTP_EXPIRED')
+  }
+  if (record.otp !== otp) throw new Error('OTP_INVALID')
+  return record
+}
+
 /**
- * Change password (authenticated) — verifies current password first.
+ * Change password (authenticated) — verifies current password or email OTP first.
  */
-export const changePassword = async (userId, { currentPassword, newPassword }) => {
+export const changePassword = async (userId, { currentPassword, otp, newPassword }) => {
   const user = await User.findById(userId).select('+password')
   if (!user) throw new Error('USER_NOT_FOUND')
 
-  const valid = await comparePassword(currentPassword, user.password)
-  if (!valid) throw new Error('WRONG_PASSWORD')
+  if (currentPassword) {
+    const valid = await comparePassword(currentPassword, user.password)
+    if (!valid) throw new Error('WRONG_PASSWORD')
+  } else if (otp) {
+    const record = assertPasswordOtpRecord(userId, otp)
+    if (!record.verified) throw new Error('OTP_NOT_VERIFIED')
+    passwordChangeOtps.delete(userId)
+  } else {
+    throw new Error('AUTH_REQUIRED')
+  }
 
   user.password = await hashPassword(newPassword)
   await user.save()
   return { ok: true }
 }
 
+/**
+ * Request password change OTP — sends OTP to user's current email.
+ */
+export const requestPasswordChangeOtp = async (userId, lang = 'vi') => {
+  const user = await User.findById(userId)
+  if (!user) throw new Error('USER_NOT_FOUND')
+
+  const existing = passwordChangeOtps.get(userId)
+  if (existing?.lastSentAt && Date.now() - existing.lastSentAt < PASSWORD_OTP_COOLDOWN_MS) {
+    const waitSec = Math.ceil((PASSWORD_OTP_COOLDOWN_MS - (Date.now() - existing.lastSentAt)) / 1000)
+    const err = new Error('OTP_COOLDOWN')
+    err.waitSec = waitSec
+    throw err
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString()
+  const expiresAt = Date.now() + 10 * 60 * 1000 // 10 min
+
+  passwordChangeOtps.set(userId, { otp, expiresAt, verified: false, lastSentAt: Date.now() })
+
+  const { sendOtpEmail } = await import('./email.service.js')
+  try {
+    await sendOtpEmail(user.email, otp, lang, 'password_change')
+  } catch (err) {
+    console.error('[email] Password change OTP send failed:', err.message)
+    console.log(`[email] Password change OTP for ${user.email}: ${otp}`)
+  }
+
+  return { ok: true, cooldownSec: Math.ceil(PASSWORD_OTP_COOLDOWN_MS / 1000) }
+}
+
+/**
+ * Verify password change OTP (step before setting new password).
+ */
+export const verifyPasswordChangeOtp = async (userId, otp) => {
+  const record = assertPasswordOtpRecord(userId, otp)
+  record.verified = true
+  passwordChangeOtps.set(userId, record)
+  return { ok: true }
+}
+
 // In-memory OTP store (TTL 10 minutes). For production, use Redis.
 const emailChangeOtps = new Map()
+const emailChangePasswordVerified = new Map()
+const EMAIL_CHANGE_VERIFY_TTL_MS = 10 * 60 * 1000
+
+/**
+ * Verify current password before allowing email change.
+ */
+export const verifyEmailChangePassword = async (userId, currentPassword) => {
+  const user = await User.findById(userId).select('+password')
+  if (!user) throw new Error('USER_NOT_FOUND')
+
+  const valid = await comparePassword(currentPassword, user.password)
+  if (!valid) throw new Error('WRONG_PASSWORD')
+
+  emailChangePasswordVerified.set(userId, {
+    verifiedAt: Date.now(),
+    expiresAt: Date.now() + EMAIL_CHANGE_VERIFY_TTL_MS,
+  })
+
+  return { ok: true }
+}
 
 /**
  * Request email change — generates OTP and sends to new email.
  */
 export const requestEmailChangeOtp = async (userId, newEmail, lang = 'vi') => {
   const normalizedEmail = newEmail.trim().toLowerCase()
+
+  const verified = emailChangePasswordVerified.get(userId)
+  if (!verified || Date.now() > verified.expiresAt) {
+    emailChangePasswordVerified.delete(userId)
+    throw new Error('PASSWORD_NOT_VERIFIED')
+  }
 
   // Check if email already taken
   const existing = await User.findOne({ email: normalizedEmail })
@@ -553,6 +653,7 @@ export const confirmEmailChange = async (userId, otp) => {
   user.email = record.newEmail
   await user.save()
   emailChangeOtps.delete(userId)
+  emailChangePasswordVerified.delete(userId)
 
   try {
     await indexUser({ id: user._id.toString(), name: user.name, email: user.email, updatedAt: user.updatedAt })
