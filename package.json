@@ -18,7 +18,9 @@
     "db:seed:challenges": "node database/seed-challenges.js",
     "db:seed:achievements-learning": "node database/seed-achievements-learning.js",
     "db:seed:quest-pool": "node database/seed-periodic-quest-pool.js",
-    "db:seed:all": "node database/seed.js"
+    "db:seed:all": "node database/seed.js",
+    "db:migrate:mocktest-rl": "node database/migrate-mocktest-rl-graded.js",
+    "db:migrate:mocktest-status": "node database/migrate-mocktest-session-status.js"
   },
   "keywords": [
     "engsocial",

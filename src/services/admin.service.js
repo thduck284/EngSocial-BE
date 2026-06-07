@@ -1,9 +1,12 @@
-import { User, Lesson, Post, Comment, ContentReport, RefreshToken, PasswordResetToken } from '../models/index.js'
+import { User, Lesson, Post, Comment, ContentReport, RefreshToken, PasswordResetToken, Message, Conversation } from '../models/index.js'
 import { UserDTO, LessonDTO, PostDTO } from '../dto/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
 import { hashPassword } from '../utils/index.js'
 import { indexUser, deleteUserFromIndex } from '../config/elasticsearch/userSearch.service.js'
-import { sendUserStatusChangeEmail } from './email.service.js'
+import { sendUserStatusChangeEmail, resolveAccountEmailLang, getAccountStatusLabels, getAccountStatusChangeDetail } from './email.service.js'
+import * as notificationService from './notification.service.js'
+import { emitToUser } from '../config/socket.js'
+import { getMessage } from '../locales/messages.js'
 
 // ========== USER MANAGEMENT ==========
 
@@ -136,13 +139,153 @@ export const updateUserRole = async (userId, { role }) => {
 }
 
 /**
+ * In-app + realtime notification when admin changes account status.
+ */
+async function notifyUserAccountStatusChange(io, user, { prevStatus, newStatus, notifyLang }) {
+  const lang = resolveAccountEmailLang(user, notifyLang)
+  const { prevLabel, newLabel } = getAccountStatusLabels(lang, prevStatus, newStatus)
+  const title = getMessage(lang, 'notifications.accountStatusChangedTitle')
+  const transition = getMessage(lang, 'notifications.accountStatusChangedMessage', { prevLabel, newLabel })
+  const detail = getAccountStatusChangeDetail(lang, newStatus)
+  const message = `${transition} ${detail}`
+
+  const notification = await notificationService.createNotification({
+    userId: user._id,
+    type: 'system',
+    title,
+    message,
+    relatedId: user._id,
+    relatedType: 'user',
+    data: {
+      kind: 'account_status_change',
+      prevStatus,
+      newStatus,
+      prevLabel,
+      newLabel,
+    },
+  })
+
+  if (io) {
+    emitToUser(io, user._id, 'notification', notification)
+  }
+
+  return notification
+}
+
+const REPORT_STATUS_LABEL_KEYS = {
+  pending: 'notifications.reportStatusLabelPending',
+  reviewed: 'notifications.reportStatusLabelReviewed',
+  dismissed: 'notifications.reportStatusLabelDismissed',
+}
+
+const REPORT_STATUS_DETAIL_KEYS = {
+  pending: 'notifications.reportStatusDetailPending',
+  reviewed: 'notifications.reportStatusDetailReviewed',
+  dismissed: 'notifications.reportStatusDetailDismissed',
+}
+
+const REPORT_TARGET_TYPE_LABEL_KEYS = {
+  post: 'notifications.reportTargetTypePost',
+  user: 'notifications.reportTargetTypeUser',
+  message: 'notifications.reportTargetTypeMessage',
+  conversation: 'notifications.reportTargetTypeConversation',
+}
+
+function getReportStatusLabels(lang, prevStatus, newStatus) {
+  return {
+    prevLabel: getMessage(lang, REPORT_STATUS_LABEL_KEYS[prevStatus] || REPORT_STATUS_LABEL_KEYS.pending),
+    newLabel: getMessage(lang, REPORT_STATUS_LABEL_KEYS[newStatus] || REPORT_STATUS_LABEL_KEYS.pending),
+  }
+}
+
+function getReportStatusChangeDetail(lang, newStatus) {
+  return getMessage(lang, REPORT_STATUS_DETAIL_KEYS[newStatus] || REPORT_STATUS_DETAIL_KEYS.pending)
+}
+
+function getReportTargetTypeLabel(lang, targetType) {
+  return getMessage(lang, REPORT_TARGET_TYPE_LABEL_KEYS[targetType] || REPORT_TARGET_TYPE_LABEL_KEYS.post)
+}
+
+function getReportStatusNotificationContent(lang, { newStatus, targetTypeLabel, prevLabel, newLabel }) {
+  if (newStatus === 'reviewed') {
+    return {
+      title: getMessage(lang, 'notifications.reportStatusAcceptedTitle'),
+      message: getMessage(lang, 'notifications.reportStatusAcceptedMessage', { targetTypeLabel }),
+    }
+  }
+  if (newStatus === 'dismissed') {
+    return {
+      title: getMessage(lang, 'notifications.reportStatusRejectedTitle'),
+      message: getMessage(lang, 'notifications.reportStatusRejectedMessage', { targetTypeLabel }),
+    }
+  }
+  return {
+    title: getMessage(lang, 'notifications.reportStatusChangedTitle'),
+    message: `${getMessage(lang, 'notifications.reportStatusChangedMessage', {
+      prevLabel,
+      newLabel,
+      targetTypeLabel,
+    })} ${getReportStatusChangeDetail(lang, newStatus)}`,
+  }
+}
+
+/**
+ * In-app + realtime notification when admin changes content report status.
+ */
+async function notifyReporterReportStatusChange(io, report, { prevStatus, newStatus, notifyLang }) {
+  const reporter = await User.findById(report.reporterId).select('preferences.language name email')
+  if (!reporter) return
+
+  const lang = resolveAccountEmailLang(reporter, notifyLang)
+  const { prevLabel, newLabel } = getReportStatusLabels(lang, prevStatus, newStatus)
+  const targetTypeLabel = getReportTargetTypeLabel(lang, report.targetType)
+  const { title, message } = getReportStatusNotificationContent(lang, {
+    newStatus,
+    targetTypeLabel,
+    prevLabel,
+    newLabel,
+  })
+
+  const relatedType = report.targetType === 'post' || report.targetType === 'user' ? report.targetType : undefined
+  const relatedId = relatedType ? report.targetId : report._id
+
+  const notification = await notificationService.createNotification({
+    userId: reporter._id,
+    type: 'system',
+    title,
+    message,
+    relatedId,
+    relatedType,
+    data: {
+      kind: 'report_status_change',
+      reportId: report._id.toString(),
+      prevStatus,
+      newStatus,
+      prevLabel,
+      newLabel,
+      outcome: newStatus === 'reviewed' ? 'accepted' : newStatus === 'dismissed' ? 'rejected' : 'pending',
+      targetType: report.targetType,
+      targetId: report.targetId?.toString(),
+      reason: report.reason,
+    },
+  })
+
+  if (io) {
+    emitToUser(io, reporter._id, 'notification', notification)
+  }
+
+  return notification
+}
+
+/**
  * Update user status (admin) - ban/activate
  * @param {string} userId
  * @param {{ status: string }} body
- * @param {{ notifyLang?: string }} [opts] - Ngôn ngữ fallback cho email (Accept-Language); ưu tiên user.preferences.language
+ * @param {{ notifyLang?: string, io?: import('socket.io').Server }} [opts]
  */
 export const updateUserStatus = async (userId, { status }, opts = {}) => {
   const notifyLang = opts.notifyLang || 'vi'
+  const io = opts.io
   const user = await User.findById(userId)
   if (!user) throw new Error('USER_NOT_FOUND')
   if (!['active', 'inactive', 'banned', 'pending'].includes(status)) throw new Error('INVALID_STATUS')
@@ -153,6 +296,9 @@ export const updateUserStatus = async (userId, { status }, opts = {}) => {
   user.status = status
   await user.save()
   void sendUserStatusChangeEmail(user, { prevStatus, newStatus: status, notifyLang })
+  void notifyUserAccountStatusChange(io, user, { prevStatus, newStatus: status, notifyLang }).catch((err) => {
+    console.error('[admin] notifyUserAccountStatusChange failed:', err?.message || err)
+  })
   return new UserDTO(user)
 }
 
@@ -238,12 +384,278 @@ export const moderateComment = async (commentId, { status }) => {
   return true
 }
 
-// ========== STATISTICS ==========
-
-/**
- * Get system statistics (admin dashboard)
- */
 // ========== CONTENT REPORTS (admin) ==========
+
+const REPORT_TARGET_PREVIEW_MAX = 160
+
+function truncateReportText(text, max = REPORT_TARGET_PREVIEW_MAX) {
+  const s = String(text || '').trim().replace(/\s+/g, ' ')
+  if (!s) return ''
+  return s.length <= max ? s : `${s.slice(0, max)}…`
+}
+
+function mapReportAuthor(userDoc) {
+  if (!userDoc) return null
+  if (typeof userDoc === 'object' && userDoc._id) {
+    return {
+      id: userDoc._id.toString(),
+      name: userDoc.name || '—',
+      email: userDoc.email || '',
+      avatar: userDoc.avatar || '',
+    }
+  }
+  return null
+}
+
+async function loadAdminConversationMessages(conversationId) {
+  const notDeletedForEveryone = { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] }
+  const rows = await Message.find({ conversationId, ...notDeletedForEveryone })
+    .populate('senderId', 'name email avatar')
+    .sort({ createdAt: 1 })
+    .lean()
+
+  const messages = rows.map((m) => ({
+    id: m._id.toString(),
+    sender: mapReportAuthor(m.senderId),
+    content: m.content || '',
+    messageType: m.messageType || 'user',
+    attachments: (m.attachments || []).map((a) => ({
+      url: a?.url || '',
+      name: a?.name || '',
+      type: a?.type || '',
+    })),
+    createdAt: m.createdAt,
+  }))
+
+  return { messages, truncated: false }
+}
+
+async function enrichReportTargetPreviewForDetail(report, preview) {
+  if (!preview?.found) return preview
+
+  if (report.targetType === 'conversation') {
+    const { messages, truncated } = await loadAdminConversationMessages(report.targetId)
+    return {
+      ...preview,
+      viewPath: null,
+      content: '',
+      meta: {
+        ...preview.meta,
+        messages,
+        messagesTruncated: truncated,
+      },
+    }
+  }
+
+  if (report.targetType === 'message') {
+    return { ...preview, viewPath: null }
+  }
+
+  return preview
+}
+
+async function loadReportTargetMaps(rows) {
+  const postIds = []
+  const messageIds = []
+  const conversationIds = []
+  const userIds = []
+
+  for (const r of rows) {
+    const id = r.targetId
+    if (!id) continue
+    if (r.targetType === 'post') postIds.push(id)
+    else if (r.targetType === 'message') messageIds.push(id)
+    else if (r.targetType === 'conversation') conversationIds.push(id)
+    else if (r.targetType === 'user') userIds.push(id)
+    if (r.contextConversationId) conversationIds.push(r.contextConversationId)
+  }
+
+  const uniq = (arr) => [...new Set(arr.map(String))]
+
+  const [posts, messages, conversations, users] = await Promise.all([
+    postIds.length
+      ? Post.find({ _id: { $in: uniq(postIds) } })
+          .populate('authorId', 'name email avatar')
+          .select('content images video status authorId createdAt')
+          .lean()
+      : [],
+    messageIds.length
+      ? Message.find({ _id: { $in: uniq(messageIds) } })
+          .populate('senderId', 'name email avatar')
+          .select('content attachments conversationId senderId messageType deletedAt createdAt')
+          .lean()
+      : [],
+    conversationIds.length
+      ? Conversation.find({ _id: { $in: uniq(conversationIds) } })
+          .populate('participants', 'name email avatar')
+          .select('name avatar type participants createdAt')
+          .lean()
+      : [],
+    userIds.length
+      ? User.find({ _id: { $in: uniq(userIds) } })
+          .select('name email avatar bio status role createdAt')
+          .lean()
+      : [],
+  ])
+
+  return {
+    posts: new Map(posts.map((p) => [String(p._id), p])),
+    messages: new Map(messages.map((m) => [String(m._id), m])),
+    conversations: new Map(conversations.map((c) => [String(c._id), c])),
+    users: new Map(users.map((u) => [String(u._id), u])),
+  }
+}
+
+function buildReportTargetPreview(report, maps) {
+  const { targetType, targetId, contextConversationId } = report
+  const empty = {
+    found: false,
+    unavailable: false,
+    excerpt: '',
+    content: '',
+    label: '',
+    author: null,
+    images: [],
+    attachments: [],
+    video: null,
+    status: null,
+    createdAt: null,
+    viewPath: null,
+    conversationId: contextConversationId ? String(contextConversationId) : null,
+    meta: {},
+  }
+
+  if (!targetId) return empty
+
+  if (targetType === 'post') {
+    const post = maps.posts.get(String(targetId))
+    if (!post) return { ...empty, label: 'not_found' }
+    const unavailable = post.status === 'deleted' || post.status === 'hidden'
+    const author = mapReportAuthor(post.authorId)
+    return {
+      found: true,
+      unavailable,
+      label: author?.name || 'Post',
+      excerpt: truncateReportText(post.content),
+      content: post.content || '',
+      author,
+      images: (post.images || []).slice(0, 6),
+      attachments: [],
+      video: post.video || null,
+      status: post.status,
+      createdAt: post.createdAt,
+      viewPath: `/post/${String(targetId)}`,
+      conversationId: null,
+      meta: { targetStatus: post.status },
+    }
+  }
+
+  if (targetType === 'message') {
+    const msg = maps.messages.get(String(targetId))
+    if (!msg) return { ...empty, label: 'not_found' }
+    const unavailable = !!msg.deletedAt || msg.messageType === 'system'
+    const author = mapReportAuthor(msg.senderId)
+    const convId = msg.conversationId ? String(msg.conversationId) : null
+    const attachmentNames = (msg.attachments || []).map((a) => a?.name || a?.url).filter(Boolean)
+    const text = msg.content || attachmentNames.join(', ')
+    return {
+      found: true,
+      unavailable,
+      label: author?.name || 'Message',
+      excerpt: truncateReportText(text),
+      content: msg.content || '',
+      author,
+      images: [],
+      attachments: (msg.attachments || []).slice(0, 6).map((a) => ({
+        url: a?.url || '',
+        name: a?.name || '',
+        type: a?.type || '',
+      })),
+      video: null,
+      status: msg.deletedAt ? 'deleted' : msg.messageType,
+      createdAt: msg.createdAt,
+      viewPath: null,
+      conversationId: convId || (contextConversationId ? String(contextConversationId) : null),
+      meta: { messageType: msg.messageType },
+    }
+  }
+
+  if (targetType === 'conversation') {
+    const conv = maps.conversations.get(String(targetId))
+    if (!conv) return { ...empty, label: 'not_found' }
+    const memberCount = (conv.participants || []).length
+    const label = conv.type === 'group' ? conv.name || 'Group' : 'Conversation'
+    const memberNames = (conv.participants || [])
+      .slice(0, 8)
+      .map((p) => (typeof p === 'object' ? p.name : null))
+      .filter(Boolean)
+    const excerpt = memberNames.length
+      ? memberNames.join(', ')
+      : `${memberCount} member${memberCount === 1 ? '' : 's'}`
+    return {
+      found: true,
+      unavailable: false,
+      label,
+      excerpt: truncateReportText(excerpt, 200),
+      content: excerpt,
+      author: null,
+      images: conv.avatar ? [conv.avatar] : [],
+      attachments: [],
+      video: null,
+      status: conv.type,
+      createdAt: conv.createdAt,
+      viewPath: null,
+      conversationId: String(targetId),
+      meta: { memberCount, members: (conv.participants || []).slice(0, 12).map(mapReportAuthor).filter(Boolean) },
+    }
+  }
+
+  if (targetType === 'user') {
+    const u = maps.users.get(String(targetId))
+    if (!u) return { ...empty, label: 'not_found' }
+    return {
+      found: true,
+      unavailable: u.status === 'banned' || u.status === 'inactive',
+      label: u.name || 'User',
+      excerpt: truncateReportText(u.bio || u.email || ''),
+      content: u.bio || '',
+      author: mapReportAuthor(u),
+      images: u.avatar ? [u.avatar] : [],
+      attachments: [],
+      video: null,
+      status: u.status,
+      createdAt: u.createdAt,
+      viewPath: `/profile/${String(targetId)}`,
+      conversationId: null,
+      meta: { email: u.email, role: u.role },
+    }
+  }
+
+  return empty
+}
+
+function mapContentReportRow(r, targetPreview) {
+  return {
+    id: r._id.toString(),
+    reporter: r.reporterId
+      ? {
+          id: r.reporterId._id?.toString(),
+          name: r.reporterId.name,
+          email: r.reporterId.email,
+          avatar: r.reporterId.avatar,
+        }
+      : null,
+    targetType: r.targetType,
+    targetId: r.targetId?.toString(),
+    contextConversationId: r.contextConversationId ? r.contextConversationId.toString() : null,
+    reason: r.reason,
+    details: r.details || '',
+    status: r.status,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    targetPreview,
+  }
+}
 
 /**
  * Danh sách báo cáo (bảng ContentReport)
@@ -264,25 +676,8 @@ export const getContentReports = async ({ page = 1, limit = 20, status, targetTy
     .limit(perPage)
     .lean()
 
-  const reports = rows.map((r) => ({
-    id: r._id.toString(),
-    reporter: r.reporterId
-      ? {
-          id: r.reporterId._id?.toString(),
-          name: r.reporterId.name,
-          email: r.reporterId.email,
-          avatar: r.reporterId.avatar,
-        }
-      : null,
-    targetType: r.targetType,
-    targetId: r.targetId?.toString(),
-    contextConversationId: r.contextConversationId ? r.contextConversationId.toString() : null,
-    reason: r.reason,
-    details: r.details || '',
-    status: r.status,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-  }))
+  const maps = await loadReportTargetMaps(rows)
+  const reports = rows.map((r) => mapContentReportRow(r, buildReportTargetPreview(r, maps)))
 
   return {
     reports,
@@ -291,22 +686,52 @@ export const getContentReports = async ({ page = 1, limit = 20, status, targetTy
 }
 
 /**
- * Cập nhật trạng thái xử lý báo cáo
+ * Chi tiết một báo cáo kèm nội dung đối tượng bị tố cáo
  */
-export const updateContentReportStatus = async (reportId, { status }) => {
+export const getContentReportById = async (reportId) => {
+  const row = await ContentReport.findById(reportId)
+    .populate('reporterId', 'name email avatar')
+    .lean()
+  if (!row) throw new Error('REPORT_NOT_FOUND')
+  const maps = await loadReportTargetMaps([row])
+  const basePreview = buildReportTargetPreview(row, maps)
+  const targetPreview = await enrichReportTargetPreviewForDetail(row, basePreview)
+  return mapContentReportRow(row, targetPreview)
+}
+
+/**
+ * Cập nhật trạng thái xử lý báo cáo
+ * @param {string} reportId
+ * @param {{ status: string }} body
+ * @param {{ notifyLang?: string, io?: import('socket.io').Server }} [opts]
+ */
+export const updateContentReportStatus = async (reportId, { status }, opts = {}) => {
   if (!['pending', 'reviewed', 'dismissed'].includes(status)) {
     throw new Error('INVALID_REPORT_STATUS')
   }
-  const doc = await ContentReport.findByIdAndUpdate(
-    reportId,
-    { status },
-    { new: true }
-  )
-    .select('_id status')
-    .lean()
-  if (!doc) throw new Error('REPORT_NOT_FOUND')
-  return { id: doc._id.toString(), status: doc.status }
+  const report = await ContentReport.findById(reportId)
+  if (!report) throw new Error('REPORT_NOT_FOUND')
+
+  const prevStatus = report.status
+  if (prevStatus === status) {
+    return { id: report._id.toString(), status: report.status }
+  }
+
+  report.status = status
+  await report.save()
+
+  void notifyReporterReportStatusChange(opts.io, report, {
+    prevStatus,
+    newStatus: status,
+    notifyLang: opts.notifyLang || 'vi',
+  }).catch((err) => {
+    console.error('[admin] notifyReporterReportStatusChange failed:', err?.message || err)
+  })
+
+  return { id: report._id.toString(), status: report.status }
 }
+
+// ========== STATISTICS ==========
 
 function calendarMonthBounds(ref = new Date()) {
   const y = ref.getFullYear()

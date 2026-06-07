@@ -88,12 +88,48 @@ const STATUS_LABEL_KEYS = {
   pending: 'emailAccount.statusLabelPending',
 }
 
+const STATUS_DETAIL_KEYS = {
+  active: 'emailAccount.statusChangedDetailActive',
+  inactive: 'emailAccount.statusChangedDetailInactive',
+  banned: 'emailAccount.statusChangedDetailBanned',
+  pending: 'emailAccount.statusChangedDetailPending',
+}
+
 function resolveAccountEmailLang(userDoc, adminRequestLang) {
   const pref = userDoc?.preferences?.language
   if (pref === 'vi' || pref === 'en') return pref
   if (adminRequestLang === 'vi' || adminRequestLang === 'en') return adminRequestLang
   return 'vi'
 }
+
+export function getAccountStatusLabels(lang, prevStatus, newStatus) {
+  return {
+    prevLabel: getMessage(lang, STATUS_LABEL_KEYS[prevStatus] || STATUS_LABEL_KEYS.pending),
+    newLabel: getMessage(lang, STATUS_LABEL_KEYS[newStatus] || STATUS_LABEL_KEYS.pending),
+  }
+}
+
+export function getAccountStatusChangeDetail(lang, newStatus) {
+  return getMessage(lang, STATUS_DETAIL_KEYS[newStatus] || STATUS_DETAIL_KEYS.pending)
+}
+
+function getAccountStatusChangeFooterNote(lang, newStatus) {
+  const key =
+    newStatus === 'active' ? 'emailAccount.statusChangedP3Active' : 'emailAccount.statusChangedP3Restricted'
+  return getMessage(lang, key)
+}
+
+function getAccountStatusChangeContact(lang) {
+  return {
+    title: getMessage(lang, 'emailAccount.statusChangedContactTitle'),
+    email: getMessage(lang, 'emailAccount.statusChangedContactEmail'),
+    phone: getMessage(lang, 'emailAccount.statusChangedContactPhone'),
+    hours: getMessage(lang, 'emailAccount.statusChangedContactHours'),
+    website: getMessage(lang, 'emailAccount.statusChangedContactWebsite'),
+  }
+}
+
+export { resolveAccountEmailLang }
 
 function escapeHtml(s) {
   return String(s)
@@ -120,12 +156,20 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
   const tagline = getMessage(lang, 'emailAccount.statusChangedEmailTagline')
   const greeting = getMessage(lang, 'emailAccount.statusChangedGreeting', { name })
   const p1 = getMessage(lang, 'emailAccount.statusChangedP1', { prevLabel, newLabel })
-  const p2 = getMessage(lang, 'emailAccount.statusChangedP2')
-  const p3 = getMessage(lang, 'emailAccount.statusChangedP3')
+  const p2 = getAccountStatusChangeDetail(lang, newStatus)
+  const p3 = getAccountStatusChangeFooterNote(lang, newStatus)
+  const contact = getAccountStatusChangeContact(lang)
   const footer = getMessage(lang, 'emailAccount.statusChangedFooter')
   const capPrev = getMessage(lang, 'emailAccount.statusComparePrevCaption')
   const capNew = getMessage(lang, 'emailAccount.statusCompareNewCaption')
-  const textBody = [greeting, p1, p2, p3, footer].join('\n\n')
+  const contactBlock = [
+    contact.title,
+    `Email: ${contact.email}`,
+    `Hotline: ${contact.phone}`,
+    contact.hours,
+    contact.website,
+  ].join('\n')
+  const textBody = [greeting, p1, p2, p3, contactBlock, footer].join('\n\n')
 
   if (!transporter) {
     // eslint-disable-next-line no-console
@@ -143,6 +187,11 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
   const safeFooter = escapeHtml(footer)
   const safeCapPrev = escapeHtml(capPrev)
   const safeCapNew = escapeHtml(capNew)
+  const safeContactTitle = escapeHtml(contact.title)
+  const safeContactEmail = escapeHtml(contact.email)
+  const safeContactPhone = escapeHtml(contact.phone)
+  const safeContactHours = escapeHtml(contact.hours)
+  const safeContactWebsite = escapeHtml(contact.website)
 
   try {
     await transporter.sendMail({
@@ -189,6 +238,28 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
               <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#334155;">${safeP1}</p>
               <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#475569;">${safeP2}</p>
               <p style="margin:0 0 28px;font-size:15px;line-height:1.65;color:#475569;">${safeP3}</p>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background:#f8fafc;border-radius:14px;border:1px solid #e2e8f0;">
+                <tr>
+                  <td style="padding:18px 20px;">
+                    <p style="margin:0 0 12px;font-size:13px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:0.05em;">${safeContactTitle}</p>
+                    <p style="margin:0 0 8px;font-size:14px;line-height:1.55;color:#475569;">
+                      <span style="color:#64748b;">Email:</span>
+                      <a href="mailto:${safeContactEmail}" style="color:#4f46e5;text-decoration:none;font-weight:600;">${safeContactEmail}</a>
+                    </p>
+                    <p style="margin:0 0 8px;font-size:14px;line-height:1.55;color:#475569;">
+                      <span style="color:#64748b;">Hotline:</span>
+                      <span style="font-weight:600;color:#334155;">${safeContactPhone}</span>
+                    </p>
+                    <p style="margin:0 0 8px;font-size:14px;line-height:1.55;color:#475569;">
+                      <span style="color:#64748b;">${safeContactHours}</span>
+                    </p>
+                    <p style="margin:0;font-size:14px;line-height:1.55;color:#475569;">
+                      <span style="color:#64748b;">Web:</span>
+                      <a href="${safeContactWebsite}" style="color:#4f46e5;text-decoration:none;font-weight:600;">${safeContactWebsite}</a>
+                    </p>
+                  </td>
+                </tr>
+              </table>
               <div style="height:1px;background:linear-gradient(90deg,transparent,#e2e8f0,transparent);margin:0 0 20px;"></div>
               <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">${safeFooter}</p>
             </td>

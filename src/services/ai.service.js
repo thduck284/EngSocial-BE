@@ -1,12 +1,55 @@
 import dotenv from 'dotenv'
+import { Agent, fetch as undiciFetch } from 'undici'
 import { GoogleGenAI } from '@google/genai'
 
 dotenv.config()
+
+let _geminiTlsAgent = null
+let _originalFetch = null
+
+function geminiTlsInsecureEnabled() {
+  const geminiFlag = (process.env.GEMINI_TLS_INSECURE || '').trim().toLowerCase()
+  if (geminiFlag === '0' || geminiFlag === 'false' || geminiFlag === 'no') return false
+  if (geminiFlag === '1' || geminiFlag === 'true' || geminiFlag === 'yes') return true
+
+  const sharedFlag = (process.env.CHAT_BOT_TLS_INSECURE || '').trim().toLowerCase()
+  if (sharedFlag === '1' || sharedFlag === 'true' || sharedFlag === 'yes') return true
+
+  return false
+}
+
+function geminiTlsAgent() {
+  if (!_geminiTlsAgent) {
+    _geminiTlsAgent = new Agent({
+      connect: { rejectUnauthorized: false },
+      keepAliveTimeout: 60_000,
+      keepAliveMaxTimeout: 120_000,
+    })
+  }
+  return _geminiTlsAgent
+}
+
+/** Node trên Windows hay lỗi UNABLE_TO_VERIFY_LEAF_SIGNATURE khi gọi generativelanguage.googleapis.com */
+function ensureGeminiFetchPatch() {
+  if (!geminiTlsInsecureEnabled()) return
+  if (_originalFetch) return
+
+  _originalFetch = globalThis.fetch
+  globalThis.fetch = (url, init) => {
+    const urlStr = String(url)
+    if (/generativelanguage\.googleapis\.com/i.test(urlStr)) {
+      return undiciFetch(url, { ...init, dispatcher: geminiTlsAgent() })
+    }
+    return _originalFetch(url, init)
+  }
+}
 
 /**
  * AI Service to handle grading and feedback using Gemini
  */
 export const gradeWriting = async (prompt, studentSubmission, metadata = {}) => {
+  ensureGeminiFetchPatch()
+
   const { level = 'B1', wordLimit = { min: 100, max: 200 } } = metadata
   
   const apiKey = process.env.GEMINI_API_KEY
@@ -98,10 +141,11 @@ Target CEFR level: ${level}. Word limit: ${wordLimit.min}-${wordLimit.max} words
   `
 
   const modelsToTry = [
-    'gemini-3-flash-preview', 
-    'gemini-2.5-flash', 
-    'gemini-2.0-flash', 
-    'gemini-1.5-flash'
+    'gemini-2.5-flash-lite',
+    'gemini-2.0-flash-lite',
+    'gemini-flash-latest',
+    'gemini-2.5-flash',
+    'gemini-3-flash-preview',
   ]
 
   let lastError = null
@@ -119,7 +163,8 @@ Target CEFR level: ${level}. Word limit: ${wordLimit.min}-${wordLimit.max} words
       const text = response.text
       return JSON.parse(text)
     } catch (error) {
-      console.warn(`Model ${modelName} failed, trying next...`, error.message)
+      const cause = error?.cause?.code || error?.cause?.message || ''
+      console.warn(`Model ${modelName} failed, trying next...`, error.message, cause ? `(${cause})` : '')
       lastError = error
     }
   }

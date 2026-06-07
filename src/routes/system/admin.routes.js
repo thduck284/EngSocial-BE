@@ -28,6 +28,7 @@ router.patch('/users/:id/status', auth, requireAdmin, adminController.updateUser
 
 // Content reports (admin only) — bảng ContentReport
 router.get('/reports', auth, requireAdmin, adminController.getContentReports)
+router.get('/reports/:id', auth, requireAdmin, adminController.getContentReportById)
 router.patch(
   '/reports/:id/status',
   auth,

@@ -504,6 +504,24 @@ export const getLessonProgress = async (req, res, next) => {
 }
 
 /**
+ * Mod/admin: get a student's lesson progress for result view
+ * GET /api/lessons/:id/progress/:targetUserId?attemptNo=1
+ */
+export const getLessonProgressForUser = async (req, res, next) => {
+  try {
+    const { id, targetUserId } = req.params
+    const { attemptNo } = req.query
+    const data = await lessonService.getLessonProgressForUser(id, targetUserId, { attemptNo })
+    return sendSuccess(res, { data }, req)
+  } catch (error) {
+    if (error.message === 'LESSON_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
  * Add a note to lesson progress
  * POST /api/lessons/:id/notes (auth)
  * Body: { title, content, category }
@@ -735,19 +753,45 @@ export const getAllLessonResults = async (req, res, next) => {
 }
 
 /**
+ * Re-sync quiz scores for all users (reading/listening only)
+ * POST /api/lessons/:id/sync-scores
+ */
+export const syncLessonQuizScores = async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const result = await lessonService.syncLessonQuizScores(id)
+    return sendSuccess(res, {
+      message: 'Scores synced successfully',
+      data: result,
+    }, req)
+  } catch (error) {
+    if (error.message === 'LESSON_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
+    }
+    if (error.message === 'SYNC_SKILL_NOT_SUPPORTED') {
+      return sendError(res, { statusCode: 400, message: 'Only reading and listening lessons can be synced' }, req)
+    }
+    if (error.message === 'LESSON_NO_QUESTIONS') {
+      return sendError(res, { statusCode: 400, message: 'Lesson has no questions to grade' }, req)
+    }
+    next(error)
+  }
+}
+
+/**
  * Grade user writing submission (Admin/Mod)
  * POST /api/lessons/:id/grade/:userId
  */
 export const gradeUserWriting = async (req, res, next) => {
   try {
     const { id, userId } = req.params
-    const { score, feedback } = req.body
+    const { score, feedback, attemptNo } = req.body
     
     if (score === undefined || score === null) {
       return sendError(res, { statusCode: 400, message: 'Score is required' }, req)
     }
 
-    const result = await lessonService.gradeUserWriting(id, userId, { score, feedback })
+    const result = await lessonService.gradeUserWriting(id, userId, { score, feedback, attemptNo })
     // Fire-and-forget achievement check for the student who got graded
     const io = req.app.get('io')
     checkAndUnlockAchievements(userId, { io }).catch((e) =>

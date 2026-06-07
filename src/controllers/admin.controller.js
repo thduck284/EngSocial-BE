@@ -42,6 +42,7 @@ export const updateUserStatus = async (req, res, next) => {
   try {
     const user = await adminService.updateUserStatus(req.params.id, req.body, {
       notifyLang: req.language || 'vi',
+      io: req.app.get('io'),
     })
     return sendSuccess(res, {
       messageKey: 'admin.statusUpdated',
@@ -209,9 +210,24 @@ export const getContentReports = async (req, res, next) => {
   }
 }
 
+export const getContentReportById = async (req, res, next) => {
+  try {
+    const data = await adminService.getContentReportById(req.params.id)
+    return sendSuccess(res, { messageKey: 'admin.reportDetailSuccess', data }, req)
+  } catch (error) {
+    if (error.message === 'REPORT_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, messageKey: 'admin.reportNotFound' }, req)
+    }
+    next(error)
+  }
+}
+
 export const updateContentReportStatus = async (req, res, next) => {
   try {
-    const data = await adminService.updateContentReportStatus(req.params.id, req.body)
+    const data = await adminService.updateContentReportStatus(req.params.id, req.body, {
+      notifyLang: req.language || 'vi',
+      io: req.app.get('io'),
+    })
     return sendSuccess(res, {
       messageKey: 'admin.reportUpdated',
       data,
