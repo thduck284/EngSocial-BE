@@ -113,10 +113,17 @@ function mapGroupId(groupId) {
   return undefined
 }
 
+function mapPostRefId(ref) {
+  if (!ref) return undefined
+  if (typeof ref === 'string') return ref
+  if (typeof ref === 'object') return ref._id?.toString?.() || ref.id?.toString?.()
+  return undefined
+}
+
 export class PostDTO extends BaseDTO {
   constructor(post) {
     super({
-      id: post._id?.toString() || post.id,
+      id: mapPostRefId(post) || post.id,
       authorId: post.authorId?.toString(),
       groupId: mapGroupId(post.groupId),
       group: mapGroup(post.groupId),
@@ -144,7 +151,7 @@ export class PostDTO extends BaseDTO {
 export class PostDetailDTO extends BaseDTO {
   constructor(post, author) {
     super({
-      id: post._id?.toString() || post.id,
+      id: mapPostRefId(post) || post.id,
       author: author ? new UserProfileDTO(author) : null,
       groupId: mapGroupId(post.groupId),
       group: mapGroup(post.groupId),
@@ -161,13 +168,14 @@ export class PostDetailDTO extends BaseDTO {
       status: post.status,
       tags: post.tags,
       mentions: mapMentions(post.mentions, post.mentionSnapshots),
-      // When this is a reshare, embed a lightweight version of the original post
-      sharedPost: post.sharedPostId
-        ? new PostDetailDTO(
-            post.sharedPostId,
-            post.sharedPostId.authorId || post.sharedPostId.author
-          )
-        : null,
+      sharedPostId: mapPostRefId(post.sharedPostId),
+      sharedPost:
+        post.sharedPostId && typeof post.sharedPostId === 'object' && post.sharedPostId.content != null
+          ? new PostDetailDTO(
+              post.sharedPostId,
+              post.sharedPostId.authorId || post.sharedPostId.author
+            )
+          : null,
       moderation: post.moderation || null,
       createdAt: post.createdAt,
       updatedAt: post.updatedAt,
