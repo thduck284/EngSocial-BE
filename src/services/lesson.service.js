@@ -126,24 +126,9 @@ export const startLesson = async (userId, lessonId) => {
 }
 
 /**
- * Submit answers for a lesson
+ * Grade quiz answers against current lesson questions (reading/listening)
  */
-export const submitAnswers = async (userId, lessonId, { answers, timeSpent, isMockTest }) => {
-  const lesson = await Lesson.findById(lessonId)
-  if (!lesson) throw new Error('LESSON_NOT_FOUND')
-
-  let progress = await UserLessonProgress.findOne({ userId, lessonId })
-  if (!progress) {
-    progress = await UserLessonProgress.create({
-      userId, lessonId, status: 'in_progress', startedAt: new Date(),
-      maxScore: lesson.questions.reduce((sum, q) => sum + (q.points || 10), 0),
-    })
-  }
-  
-  progress.isMockTest = !!isMockTest
-
-
-  // Grade answers
+function gradeQuizAnswers(lesson, answers = []) {
   let score = 0
   const gradedAnswers = answers.map((a, idx) => {
     const qIndex =
@@ -155,11 +140,11 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent, isMo
     const question = lesson.questions[qIndex] || lesson.questions.find((q) => String(q.id) === String(a.questionId))
     if (!question) {
       return {
-        questionId: String(a.questionId ?? question?.id ?? qIndex + 1),
+        questionId: String(a.questionId ?? qIndex + 1),
         questionIndex: qIndex,
         answer: a.answer,
         isCorrect: false,
-        answeredAt: new Date(),
+        answeredAt: a.answeredAt || new Date(),
       }
     }
 
@@ -178,12 +163,33 @@ export const submitAnswers = async (userId, lessonId, { answers, timeSpent, isMo
       questionIndex: qIndex,
       answer: a.answer,
       isCorrect,
-      answeredAt: new Date(),
+      answeredAt: a.answeredAt || new Date(),
     }
   })
 
   const maxScore = lesson.questions.reduce((sum, q) => sum + (q.points || 10), 0)
   const progressPercent = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0
+  return { score, maxScore, progressPercent, gradedAnswers }
+}
+
+/**
+ * Submit answers for a lesson
+ */
+export const submitAnswers = async (userId, lessonId, { answers, timeSpent, isMockTest }) => {
+  const lesson = await Lesson.findById(lessonId)
+  if (!lesson) throw new Error('LESSON_NOT_FOUND')
+
+  let progress = await UserLessonProgress.findOne({ userId, lessonId })
+  if (!progress) {
+    progress = await UserLessonProgress.create({
+      userId, lessonId, status: 'in_progress', startedAt: new Date(),
+      maxScore: lesson.questions.reduce((sum, q) => sum + (q.points || 10), 0),
+    })
+  }
+  
+  progress.isMockTest = !!isMockTest
+
+  const { score, maxScore, progressPercent, gradedAnswers } = gradeQuizAnswers(lesson, answers)
   const passedRewardThreshold = progressPercent >= 80
 
   progress.score = score
@@ -577,7 +583,10 @@ export const getAllLessonResults = async (lessonId, { page = 1, limit = 100 }) =
         xpEarned: p.xpEarned,
         completedAt: p.completedAt || p.updatedAt,
         submission: p.submission,
-        attemptNo: 1,
+        answers: [],
+        attemptType: p.submission?.content ? 'writing' : 'quiz',
+        attemptNo: p.attempts || 1,
+        timeSpent: p.timeSpent ?? 0,
       })
     } else {
       for (const a of attempts) {
@@ -597,8 +606,11 @@ export const getAllLessonResults = async (lessonId, { page = 1, limit = 100 }) =
           progress: a.progress ?? 0,
           xpEarned: a.xpEarned ?? 0,
           completedAt: a.submittedAt || p.updatedAt,
-          submission: a.submission || p.submission, // fallback if history doesn't have it
+          submission: a.submission || p.submission,
+          answers: a.answers || [],
+          attemptType: a.type || 'quiz',
           attemptNo: a.attemptNo || 0,
+          timeSpent: a.timeSpent ?? 0,
         })
       }
     }
@@ -620,50 +632,272 @@ export const getAllLessonResults = async (lessonId, { page = 1, limit = 100 }) =
 }
 
 /**
+ * Fingerprint quiz grading so sync only counts attempts whose scores actually changed.
+ */
+function quizAttemptGradingSignature(att) {
+  const answers = Array.isArray(att.answers) ? att.answers : []
+  const answerSig = answers
+    .map((a) => `${a.questionIndex ?? a.questionId}:${a.isCorrect ? 1 : 0}`)
+    .sort()
+    .join(';')
+  return `${Number(att.score) || 0}|${Number(att.maxScore) || 0}|${Number(att.progress) || 0}|${answerSig}`
+}
+
+function buildGradingSignatureFromResult(score, maxScore, progressPercent, gradedAnswers) {
+  const answerSig = (gradedAnswers || [])
+    .map((a) => `${a.questionIndex ?? a.questionId}:${a.isCorrect ? 1 : 0}`)
+    .sort()
+    .join(';')
+  return `${Number(score) || 0}|${Number(maxScore) || 0}|${Number(progressPercent) || 0}|${answerSig}`
+}
+
+/**
+ * Re-grade quiz attempts on a single progress record (reading/listening)
+ */
+export function regradeProgressQuizAttempts(progress, lesson, options = {}) {
+  const { beforeDate, syncTopLevel = true } = options
+  const cutoffMs = beforeDate
+    ? new Date(beforeDate).getTime() + 5 * 60 * 1000
+    : null
+
+  if (!lesson || !['reading', 'listening'].includes(lesson.skill)) {
+    return { changed: false, updatedAttempts: 0 }
+  }
+  if (!Array.isArray(lesson.questions) || lesson.questions.length === 0) {
+    return { changed: false, updatedAttempts: 0 }
+  }
+
+  const attempts = Array.isArray(progress.attemptHistory) ? progress.attemptHistory : []
+  if (attempts.length === 0) return { changed: false, updatedAttempts: 0 }
+
+  let changed = false
+  let updatedAttempts = 0
+  for (const att of attempts) {
+    if (att.type === 'writing') continue
+    if (!Array.isArray(att.answers) || att.answers.length === 0) continue
+    if (cutoffMs && att.submittedAt && new Date(att.submittedAt).getTime() > cutoffMs) continue
+
+    const { score, maxScore, progressPercent, gradedAnswers } = gradeQuizAnswers(lesson, att.answers)
+    const newSig = buildGradingSignatureFromResult(score, maxScore, progressPercent, gradedAnswers)
+    if (newSig === quizAttemptGradingSignature(att)) continue
+
+    att.type = att.type || 'quiz'
+    att.score = score
+    att.maxScore = maxScore
+    att.progress = progressPercent
+    att.answers = gradedAnswers
+    updatedAttempts += 1
+    changed = true
+  }
+
+  if (!changed) return { changed: false, updatedAttempts: 0 }
+
+  if (syncTopLevel) {
+    let quizAttempts = attempts.filter((a) => a.type !== 'writing' && Array.isArray(a.answers) && a.answers.length > 0)
+    if (cutoffMs) {
+      quizAttempts = quizAttempts.filter(
+        (a) => !a.submittedAt || new Date(a.submittedAt).getTime() <= cutoffMs,
+      )
+    }
+    if (quizAttempts.length > 0) {
+      const latest = quizAttempts[quizAttempts.length - 1]
+      progress.score = latest.score
+      progress.maxScore = latest.maxScore
+      progress.progress = latest.progress
+      progress.bestScore = Math.max(
+        progress.bestScore || 0,
+        ...quizAttempts.map((a) => Number(a.score) || 0),
+      )
+      if (latest.score != null && latest.maxScore != null && latest.score >= latest.maxScore * 0.8) {
+        progress.status = progress.status === 'under_review' ? progress.status : 'completed'
+      }
+    }
+  }
+
+  return { changed: true, updatedAttempts }
+}
+
+/**
+ * Mod/admin: re-grade all quiz attempts for a reading/listening lesson
+ */
+export const syncLessonQuizScores = async (lessonId) => {
+  let lesson = null
+  if (String(lessonId).match(/^[a-f\d]{24}$/i)) {
+    lesson = await Lesson.findById(lessonId)
+  }
+  if (!lesson) {
+    lesson = await Lesson.findOne({ slug: lessonId })
+  }
+  if (!lesson) throw new Error('LESSON_NOT_FOUND')
+  if (!['reading', 'listening'].includes(lesson.skill)) {
+    throw new Error('SYNC_SKILL_NOT_SUPPORTED')
+  }
+  if (!Array.isArray(lesson.questions) || lesson.questions.length === 0) {
+    throw new Error('LESSON_NO_QUESTIONS')
+  }
+
+  const allProgress = await UserLessonProgress.find({ lessonId: lesson._id })
+  let updatedUsers = 0
+  let updatedAttempts = 0
+
+  for (const progress of allProgress) {
+    const { changed, updatedAttempts: attCount } = regradeProgressQuizAttempts(progress, lesson)
+    if (!changed) continue
+    await progress.save()
+    updatedUsers += 1
+    updatedAttempts += attCount
+  }
+
+  const lessonMaxScore = lesson.questions.reduce((sum, q) => sum + (q.points || 10), 0)
+  if (lesson.maxScore !== lessonMaxScore) {
+    lesson.maxScore = lessonMaxScore
+    await lesson.save()
+  }
+
+  return {
+    lessonId: lesson._id,
+    skill: lesson.skill,
+    updatedUsers,
+    updatedAttempts,
+    totalProgress: allProgress.length,
+  }
+}
+
+function formatLessonProgressPayload(progress, attemptNo) {
+  if (!progress) {
+    return {
+      notes: [],
+      status: 'not_started',
+      progress: 0,
+      score: 0,
+      maxScore: null,
+      answers: [],
+      xpEarned: 0,
+      attempts: 0,
+      submission: null,
+      attemptHistory: [],
+      viewAttemptNo: null,
+    }
+  }
+
+  const attempts = Array.isArray(progress.attemptHistory) ? progress.attemptHistory : []
+  let attempt = null
+  if (attemptNo != null && attemptNo !== '') {
+    attempt = attempts.find((a) => a.attemptNo === Number(attemptNo))
+  }
+  if (!attempt && attempts.length > 0) {
+    attempt = attempts[attempts.length - 1]
+  }
+
+  let status = progress.status
+  if (attempt) {
+    status =
+      attempt.score != null && attempt.score !== undefined
+        ? 'completed'
+        : attempt.type === 'writing'
+          ? 'under_review'
+          : progress.status
+  }
+
+  return {
+    notes: progress.notes || [],
+    status,
+    progress: attempt?.progress ?? progress.progress,
+    score: attempt?.score ?? progress.score,
+    maxScore: attempt?.maxScore ?? progress.maxScore,
+    answers: attempt?.answers || [],
+    xpEarned: attempt?.xpEarned ?? progress.xpEarned,
+    attempts: progress.attempts || 0,
+    submission: attempt?.submission || progress.submission,
+    aiScore: progress.submission?.aiScore,
+    aiFeedback: progress.submission?.aiFeedback,
+    attemptHistory: attempts,
+    viewAttemptNo: attempt?.attemptNo ?? null,
+  }
+}
+
+/**
+ * Mod/admin: get a specific user's lesson progress (optional attemptNo)
+ */
+export const getLessonProgressForUser = async (lessonId, targetUserId, { attemptNo } = {}) => {
+  let lesson = null
+  if (String(lessonId).match(/^[a-f\d]{24}$/i)) {
+    lesson = await Lesson.findById(lessonId).select('_id').lean()
+  }
+  if (!lesson) {
+    lesson = await Lesson.findOne({ slug: lessonId }).select('_id').lean()
+  }
+  if (!lesson) throw new Error('LESSON_NOT_FOUND')
+
+  const progress = await UserLessonProgress.findOne({
+    userId: targetUserId,
+    lessonId: lesson._id,
+  }).lean()
+
+  return formatLessonProgressPayload(progress, attemptNo)
+}
+
+/**
  * Moderator grades a user's writing submission
  */
-export const gradeUserWriting = async (lessonId, userId, { score, feedback }) => {
+export const gradeUserWriting = async (lessonId, userId, { score, feedback, attemptNo }) => {
   const progress = await UserLessonProgress.findOne({ lessonId, userId })
   if (!progress) throw new Error('PROGRESS_NOT_FOUND')
 
   const lesson = await Lesson.findById(lessonId)
   if (!lesson) throw new Error('LESSON_NOT_FOUND')
 
+  const maxScore = progress.maxScore || lesson.maxScore || (lesson.questions?.reduce?.((sum, q) => sum + (q.points || 10), 0) ?? 100) || 100
+  const numericScore = Number(score)
+  if (Number.isNaN(numericScore)) throw new Error('INVALID_SCORE')
+  const progressPercent = maxScore > 0 ? Math.round((numericScore / maxScore) * 100) : 0
+  const isWriting = lesson.skill === 'writing'
+  const targetAttemptNo = attemptNo != null ? Number(attemptNo) : (progress.attempts || progress.attemptHistory?.length || 1)
 
-  // Update progress
-  const progressPercent = Math.round((score / (lesson.maxScore || 100)) * 100)
-  progress.status = 'completed'
-  progress.progress = progressPercent
-  progress.completedAt = new Date()
-  progress.score = score
-  progress.maxScore = lesson.maxScore || 100
-  progress.xpEarned = lesson.xpReward || 0
-  
-  progress.submission.score = score
-  progress.submission.feedback = feedback
-  
-  // Update last attempt in history
-  if (progress.attemptHistory.length > 0) {
-    const lastAttempt = progress.attemptHistory[progress.attemptHistory.length - 1]
-    if (lastAttempt.type === 'writing') {
-      lastAttempt.score = score
-      lastAttempt.progress = progressPercent
-      lastAttempt.xpEarned = lesson.xpReward || 0
-      lastAttempt.submission.score = score
-      lastAttempt.submission.feedback = feedback
+  const patchAttempt = (att) => {
+    if (!att) return
+    att.score = numericScore
+    att.maxScore = maxScore
+    att.progress = progressPercent
+    if (isWriting) {
+      att.submission = att.submission || {}
+      att.submission.score = numericScore
+      att.submission.feedback = feedback || ''
+      att.submission.humanGraded = true
+      att.submission.humanGradedAt = new Date()
     }
   }
 
-  // Update best score
-  if (score > (progress.bestScore || 0)) {
-    progress.bestScore = score
+  if (Array.isArray(progress.attemptHistory) && progress.attemptHistory.length > 0) {
+    const att = progress.attemptHistory.find((a) => a.attemptNo === targetAttemptNo)
+      || progress.attemptHistory[progress.attemptHistory.length - 1]
+    patchAttempt(att)
+  }
+
+  const latestAttemptNo = progress.attempts || progress.attemptHistory?.length || targetAttemptNo
+  if (targetAttemptNo === latestAttemptNo || attemptNo == null) {
+    progress.status = 'completed'
+    progress.progress = progressPercent
+    progress.completedAt = progress.completedAt || new Date()
+    progress.score = numericScore
+    progress.maxScore = maxScore
+    if (isWriting) {
+      progress.submission = progress.submission || {}
+      progress.submission.score = numericScore
+      progress.submission.feedback = feedback || ''
+      progress.submission.humanGraded = true
+      progress.submission.humanGradedAt = new Date()
+    }
+  }
+
+  if (numericScore > (progress.bestScore || 0)) {
+    progress.bestScore = numericScore
   }
 
   await progress.save()
 
-  // Award XP if score >= 80
-  const xpToAdd = (score >= 80) ? (lesson.xpReward || 50) : 0
-  if (xpToAdd > 0) {
+  const xpToAdd = progressPercent >= 80 ? (lesson.xpReward || 50) : 0
+  if (xpToAdd > 0 && targetAttemptNo === latestAttemptNo) {
     const userAccount = await User.findById(userId)
     if (userAccount) {
       userAccount.awardXp(xpToAdd)
@@ -672,32 +906,32 @@ export const gradeUserWriting = async (lessonId, userId, { score, feedback }) =>
     }
   }
 
-  // Update Skill Stats
-  await updateSkillStats(userId, 'writing', {
-    score,
-    maxScore: 100,
+  await updateSkillStats(userId, lesson.skill || 'reading', {
+    score: numericScore,
+    maxScore,
     xpEarned: xpToAdd,
-    timeSpent: progress.timeSpent || 0
+    timeSpent: progress.timeSpent || 0,
   })
 
-  // Update Mock Test session status if this part is graded
-  await mockTestService.updateSessionStatusIfCompleted(progress._id)
+  if (isWriting) {
+    await mockTestService.updateSessionStatusIfCompleted(progress._id)
+  }
 
   try {
     await bumpPeriodicQuestsOnLessonEvent(
       userId,
-      lesson.skill || 'writing',
+      lesson.skill || 'reading',
       progressPercent,
       lesson.category || 'lesson'
     )
   } catch (e) {
-    console.warn('[periodicQuest] writing grade bump:', e?.message)
+    console.warn('[periodicQuest] grade bump:', e?.message)
   }
   try {
     await incrementChallengeProgressByRequirement(userId, 'lessons', 1)
     await incrementChallengeProgressByRequirement(userId, 'score', progressPercent)
   } catch (e) {
-    console.warn('[challenge] writing grade bump:', e?.message)
+    console.warn('[challenge] grade bump:', e?.message)
   }
 
   return progress

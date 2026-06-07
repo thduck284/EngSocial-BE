@@ -18,6 +18,7 @@ const mockTestResultSchema = new mongoose.Schema({
   }],
   overallScore: { type: Number, default: 0 },
   maxTotalScore: { type: Number, default: 0 },
+  timeSpent: { type: Number, default: 0 }, // seconds — total session time
   status: {
     type: String,
     enum: ['completed', 'graded'],
