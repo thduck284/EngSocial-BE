@@ -948,6 +948,21 @@ function applyAiResultToSubmission(submission, aiResult) {
   submission.aiBreakdown = aiResult.breakdown || null
 }
 
+/** Giữ nội dung bài viết khi chỉ cập nhật điểm AI (tránh submission rỗng sau save). */
+function preserveSubmissionText(submission, sourceContent, sourceSubmission) {
+  if (!submission) return
+  if (sourceContent && !String(submission.content ?? '').trim()) {
+    submission.content = sourceContent
+  }
+  if (!sourceSubmission) return
+  if (sourceSubmission.wordCount != null && submission.wordCount == null) {
+    submission.wordCount = sourceSubmission.wordCount
+  }
+  if (sourceSubmission.submittedAt && !submission.submittedAt) {
+    submission.submittedAt = sourceSubmission.submittedAt
+  }
+}
+
 /** Resolve writing text for AI grade — mock test uses sessionCompletedAt like enrichSessionLessonResults. */
 function findWritingSubmissionSource(progress, { attemptNo, sessionCompletedAt, skill = 'writing' } = {}) {
   if (sessionCompletedAt) {
@@ -1024,21 +1039,29 @@ export const aiGradeWriting = async (lessonId, userId, { attemptNo, sessionCompl
     wordLimit: lesson.content?.wordLimit,
   })
 
+  const srcSub = source.attempt?.submission
+
   if (!progress.submission) progress.submission = {}
+  preserveSubmissionText(progress.submission, source.content, srcSub)
   applyAiResultToSubmission(progress.submission, aiResult)
 
   if (source.attempt) {
     if (!source.attempt.submission) source.attempt.submission = {}
+    preserveSubmissionText(source.attempt.submission, source.content, srcSub)
     applyAiResultToSubmission(source.attempt.submission, aiResult)
   } else if (progress.attemptHistory.length > 0) {
     const lastWriting = [...progress.attemptHistory]
       .reverse()
-      .find((a) => a?.submission?.content?.trim())
+      .find((a) => submissionContentFromAttempt(a))
     if (lastWriting) {
       if (!lastWriting.submission) lastWriting.submission = {}
+      preserveSubmissionText(lastWriting.submission, source.content, srcSub)
       applyAiResultToSubmission(lastWriting.submission, aiResult)
     }
   }
+
+  progress.markModified('submission')
+  progress.markModified('attemptHistory')
 
   await progress.save()
   return progress
