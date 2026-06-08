@@ -4,7 +4,8 @@ import { getPagination, getPaginationQuery } from '../utils/index.js'
 import { generateUniqueSlug } from '../utils/slug.js'
 import * as aiService from './ai.service.js'
 import * as mockTestService from './mockTest.service.js'
-import { pickSessionAttempt, submissionContentFromAttempt } from '../utils/sessionAttempt.js'
+import { pickSessionAttempt, submissionContentFromAttempt, resolveSessionAttemptWindow, isAttemptInSessionWindow } from '../utils/sessionAttempt.js'
+import MockTestResult from '../models/learning/MockTestResult.js'
 import { bumpPeriodicQuestsOnLessonEvent } from './userPeriodicQuest.service.js'
 import { incrementChallengeProgressByRequirement } from './challenge.service.js'
 
@@ -319,7 +320,7 @@ export const submitWriting = async (userId, lessonId, { content, wordCount, time
 
   // Trigger AI grading automatically for immediate feedback
   try {
-    await aiGradeWriting(lessonId, userId)
+    await aiGradeWriting(lessonId, userId, { attemptNo: progress.attempts })
     // Reload progress to get AI results
     const updatedProgress = await UserLessonProgress.findOne({ userId, lessonId })
     return new UserLessonProgressDTO(updatedProgress)
@@ -963,22 +964,64 @@ function preserveSubmissionText(submission, sourceContent, sourceSubmission) {
   }
 }
 
+async function resolveMockTestAttemptWindow(progressId, sessionCompletedAt) {
+  if (!sessionCompletedAt || !progressId) return null
+
+  const targetMs = new Date(sessionCompletedAt).getTime()
+  const sessions = await MockTestResult.find({ lessonResults: progressId })
+    .populate({
+      path: 'lessonResults',
+      populate: { path: 'lessonId', select: 'skill' },
+    })
+    .lean()
+
+  if (sessions.length === 0) return null
+
+  const session = sessions.find((s) => {
+    const ms = new Date(s.completedAt).getTime()
+    return Math.abs(ms - targetMs) <= 2 * 60 * 1000
+  }) ?? sessions.sort(
+    (a, b) => Math.abs(new Date(a.completedAt).getTime() - targetMs)
+      - Math.abs(new Date(b.completedAt).getTime() - targetMs),
+  )[0]
+
+  if (!session?.lessonResults?.length) return null
+  return resolveSessionAttemptWindow(session.lessonResults, sessionCompletedAt)
+}
+
 /** Resolve writing text for AI grade — mock test uses sessionCompletedAt like enrichSessionLessonResults. */
-function findWritingSubmissionSource(progress, { attemptNo, sessionCompletedAt, skill = 'writing' } = {}) {
-  if (sessionCompletedAt) {
-    const sessionAtt = pickSessionAttempt(progress, skill, sessionCompletedAt)
-    const content = submissionContentFromAttempt(sessionAtt)
-    if (content) {
-      return { content, attempt: sessionAtt, attemptNo: sessionAtt.attemptNo }
+async function findWritingSubmissionSource(progress, { attemptNo, sessionCompletedAt, skill = 'writing' } = {}) {
+  const attempts = Array.isArray(progress.attemptHistory) ? progress.attemptHistory : []
+  const hasSession = sessionCompletedAt != null && sessionCompletedAt !== ''
+  const hasAttemptNo = attemptNo != null && attemptNo !== ''
+  const attemptWindow = hasSession
+    ? await resolveMockTestAttemptWindow(progress._id, sessionCompletedAt)
+    : null
+
+  // Mock test: chỉ chấm attempt thuộc phiên, không fallback bài cũ
+  if (hasSession) {
+    if (hasAttemptNo) {
+      const att = attempts.find((a) => Number(a.attemptNo) === Number(attemptNo))
+      if (!att) return null
+      if (attemptWindow && !isAttemptInSessionWindow(att, attemptWindow)) return null
+      const content = submissionContentFromAttempt(att)
+      if (!content) return null
+      return { content, attempt: att, attemptNo: att.attemptNo }
     }
+
+    const sessionAtt = pickSessionAttempt(progress, skill, sessionCompletedAt, attemptWindow)
+    if (!sessionAtt) return null
+    const content = submissionContentFromAttempt(sessionAtt)
+    if (!content) return null
+    return { content, attempt: sessionAtt, attemptNo: sessionAtt.attemptNo }
   }
 
-  const attempts = Array.isArray(progress.attemptHistory) ? progress.attemptHistory : []
-
-  if (attemptNo != null && attemptNo !== '') {
+  if (hasAttemptNo) {
     const att = attempts.find((a) => Number(a.attemptNo) === Number(attemptNo))
+    if (!att) return null
     const content = submissionContentFromAttempt(att)
-    if (content) return { content, attempt: att, attemptNo: att.attemptNo }
+    if (!content) return null
+    return { content, attempt: att, attemptNo: att.attemptNo }
   }
 
   const topContent = progress.submission?.content?.trim()
@@ -1021,7 +1064,7 @@ export const aiGradeWriting = async (lessonId, userId, { attemptNo, sessionCompl
     throw err
   }
 
-  const source = findWritingSubmissionSource(progress, {
+  const source = await findWritingSubmissionSource(progress, {
     attemptNo,
     sessionCompletedAt,
     skill: lesson.skill,
