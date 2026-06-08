@@ -941,24 +941,37 @@ export const gradeUserWriting = async (lessonId, userId, { score, feedback, atte
  */
 export const aiGradeWriting = async (lessonId, userId) => {
   const progress = await UserLessonProgress.findOne({ lessonId, userId })
-  if (!progress) throw new Error('PROGRESS_NOT_FOUND')
+  if (!progress) {
+    const err = new Error('PROGRESS_NOT_FOUND')
+    err.status = 404
+    throw err
+  }
 
   const lesson = await Lesson.findById(lessonId)
-  if (!lesson) throw new Error('LESSON_NOT_FOUND')
+  if (!lesson) {
+    const err = new Error('LESSON_NOT_FOUND')
+    err.status = 404
+    throw err
+  }
 
-  const userContent = progress.submission?.content
-  if (!userContent) throw new Error('NO_SUBMISSION_CONTENT')
+  const userContent =
+    progress.submission?.content?.trim() ||
+    progress.attemptHistory?.[progress.attemptHistory.length - 1]?.submission?.content?.trim()
 
-  // Prompt for AI context - use specific prompt if available
+  if (!userContent) {
+    const err = new Error('NO_SUBMISSION_CONTENT')
+    err.status = 400
+    throw err
+  }
+
   const prompt = lesson.content?.prompt || lesson.title || lesson.topic || 'General Writing'
 
-  // Call AI Service with metadata
   const aiResult = await aiService.gradeWriting(prompt, userContent, {
     level: lesson.level,
-    wordLimit: lesson.content?.wordLimit
+    wordLimit: lesson.content?.wordLimit,
   })
 
-  // Update progress with AI suggestions
+  if (!progress.submission) progress.submission = {}
   progress.submission.aiScore = aiResult.score
   progress.submission.aiFeedback = aiResult.feedback
   progress.submission.aiStrengths = aiResult.strengths || []
@@ -966,9 +979,9 @@ export const aiGradeWriting = async (lessonId, userId) => {
   progress.submission.aiGrammarErrors = aiResult.grammarErrors || []
   progress.submission.aiBreakdown = aiResult.breakdown || null
 
-  // Also update last attempt in history
   if (progress.attemptHistory.length > 0) {
     const lastAttempt = progress.attemptHistory[progress.attemptHistory.length - 1]
+    if (!lastAttempt.submission) lastAttempt.submission = {}
     lastAttempt.submission.aiScore = aiResult.score
     lastAttempt.submission.aiFeedback = aiResult.feedback
     lastAttempt.submission.aiStrengths = aiResult.strengths || []

@@ -192,10 +192,11 @@ Body mẫu:
 1. Kết nối repo GitHub với Render Web Service.
 2. **Build command:** `npm install`
 3. **Start command:** `npm start`
-4. Thêm **Environment Variables** (giống `.env`, không dùng file `.env` trên cloud).
+4. Thêm **Environment Variables** (giống `.env`, không dùng file `.env` trên cloud). **Bắt buộc thêm `GEMINI_API_KEY`** nếu dùng chấm Writing bằng AI (`POST /api/lessons/:id/ai-grade/:userId`).
 5. Bắt buộc cho chatbot trên Render:
 
 ```env
+GEMINI_API_KEY=your-google-ai-studio-key
 CHAT_BOT_APP=https://YOUR-NGROK-URL.ngrok-free.app
 CHAT_BOT_TLS_INSECURE=1
 CORS_ORIGIN=https://your-frontend.onrender.com,http://localhost:3000

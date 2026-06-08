@@ -160,8 +160,11 @@ Target CEFR level: ${level}. Word limit: ${wordLimit.min}-${wordLimit.max} words
         }
       })
 
-      const text = response.text
-      return JSON.parse(text)
+      const text = response?.text
+      if (!text?.trim()) throw new Error('empty_ai_response')
+      const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '')
+      const parsed = JSON.parse(cleaned)
+      return normalizeGradeResult(parsed)
     } catch (error) {
       const cause = error?.cause?.code || error?.cause?.message || ''
       console.warn(`Model ${modelName} failed, trying next...`, error.message, cause ? `(${cause})` : '')
@@ -171,11 +174,42 @@ Target CEFR level: ${level}. Word limit: ${wordLimit.min}-${wordLimit.max} words
 
   // If all models fail
   console.error('All AI models failed:', lastError)
-  return {
-    score: 0, 
+  return normalizeGradeResult({
+    score: 0,
     feedback: 'Tất cả các mô hình AI hiện đang bận hoặc quá tải. Vui lòng thử lại sau. Lỗi cuối: ' + (lastError?.message || ''),
     strengths: [],
     improvements: [],
-    grammarErrors: []
+    grammarErrors: [],
+  })
+}
+
+function normalizeGradeResult(raw) {
+  const score = Math.max(0, Math.min(100, Number(raw?.score) || 0))
+  const breakdown = raw?.breakdown && typeof raw.breakdown === 'object'
+    ? {
+        taskResponse: Number(raw.breakdown.taskResponse) || 0,
+        coherence: Number(raw.breakdown.coherence) || 0,
+        lexical: Number(raw.breakdown.lexical) || 0,
+        grammar: Number(raw.breakdown.grammar) || 0,
+      }
+    : null
+
+  const grammarErrors = Array.isArray(raw?.grammarErrors)
+    ? raw.grammarErrors
+        .filter((e) => e && typeof e === 'object')
+        .map((e) => ({
+          original: String(e.original ?? ''),
+          correction: String(e.correction ?? ''),
+          explanation: String(e.explanation ?? ''),
+        }))
+    : []
+
+  return {
+    score,
+    feedback: String(raw?.feedback ?? ''),
+    strengths: Array.isArray(raw?.strengths) ? raw.strengths.map(String) : [],
+    improvements: Array.isArray(raw?.improvements) ? raw.improvements.map(String) : [],
+    grammarErrors,
+    breakdown,
   }
 }
