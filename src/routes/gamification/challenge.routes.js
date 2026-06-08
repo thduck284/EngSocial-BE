@@ -6,6 +6,7 @@ const router = Router()
 
 router.get('/', challengeController.getChallenges)
 router.get('/me', auth, challengeController.getUserChallenges)
+router.post('/me/register-visit', auth, challengeController.registerChallengesVisit)
 router.get('/:id', challengeController.getChallengeById)
 router.post('/', auth, requireModeratorOrAdmin, challengeController.createChallenge)
 router.put('/:id', auth, requireModeratorOrAdmin, challengeController.updateChallenge)

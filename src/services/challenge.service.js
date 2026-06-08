@@ -13,6 +13,99 @@ async function awardChallengeCompletion(participant, challenge, userId) {
   }
 }
 
+/** Đếm thật từ ChallengeParticipant (không tin số hard-code trên document Challenge). */
+async function getChallengeStatsMap(challengeIds) {
+  const ids = (challengeIds || []).filter(Boolean)
+  if (!ids.length) {
+    return { participants: new Map(), completed: new Map() }
+  }
+
+  const [participantAgg, completedAgg] = await Promise.all([
+    ChallengeParticipant.aggregate([
+      { $match: { challengeId: { $in: ids } } },
+      { $group: { _id: '$challengeId', count: { $sum: 1 } } },
+    ]),
+    ChallengeParticipant.aggregate([
+      { $match: { challengeId: { $in: ids }, completed: true } },
+      { $group: { _id: '$challengeId', count: { $sum: 1 } } },
+    ]),
+  ])
+
+  return {
+    participants: new Map(participantAgg.map((r) => [r._id.toString(), r.count])),
+    completed: new Map(completedAgg.map((r) => [r._id.toString(), r.count])),
+  }
+}
+
+function toChallengeDTO(challenge, stats) {
+  const id = challenge._id?.toString?.() || challenge.id
+  const dto = new ChallengeDTO(challenge)
+  if (stats) {
+    dto.participantCount = stats.participants.get(id) ?? 0
+    dto.completedCount = stats.completed.get(id) ?? 0
+  }
+  return dto
+}
+
+function isChallengeLive(challenge, now = new Date()) {
+  if (!challenge || challenge.status !== 'active') return false
+  if (challenge.startDate && challenge.startDate > now) return false
+  if (challenge.endDate && challenge.endDate < now) return false
+  return true
+}
+
+/** Tạo ChallengeParticipant nếu chưa có — mỗi user/challenge chỉ 1 lần. */
+async function ensureChallengeParticipant(userId, challenge, { requireNew = false } = {}) {
+  const challengeId = challenge._id ?? challenge.id
+  const existing = await ChallengeParticipant.findOne({ challengeId, userId })
+  if (existing) {
+    if (requireNew) throw new Error('ALREADY_JOINED')
+    return { participant: existing, created: false }
+  }
+
+  try {
+    const participant = await ChallengeParticipant.create({
+      challengeId,
+      userId,
+      target: challenge.requirement?.target || 0,
+      progress: 0,
+      completed: false,
+      joinedAt: new Date(),
+    })
+    await Challenge.findByIdAndUpdate(challengeId, { $inc: { participantCount: 1 } })
+    return { participant, created: true }
+  } catch (err) {
+    if (err?.code === 11000) {
+      const dup = await ChallengeParticipant.findOne({ challengeId, userId })
+      if (requireNew) throw new Error('ALREADY_JOINED')
+      return { participant: dup, created: false }
+    }
+    throw err
+  }
+}
+
+/**
+ * Khi user mở /challenge: đăng ký tham gia mọi thử thách đang mở (mỗi user/challenge +1 lần).
+ */
+export const registerActiveChallengesVisit = async (userId) => {
+  const now = new Date()
+  const activeChallenges = await Challenge.find({
+    status: 'active',
+    startDate: { $lte: now },
+    endDate: { $gte: now },
+  })
+    .select('_id requirement')
+    .lean()
+
+  let registered = 0
+  for (const challenge of activeChallenges) {
+    const { created } = await ensureChallengeParticipant(userId, challenge)
+    if (created) registered += 1
+  }
+
+  return { registered, totalActive: activeChallenges.length }
+}
+
 /**
  * Get active challenges
  */
@@ -20,20 +113,31 @@ export const getChallenges = async ({ type, skill, status, page = 1, limit = 10 
   const filter = {}
   if (type) filter.type = type
   if (skill) filter.skill = skill
-  if (status === 'all' || status === '*') {
+
+  const isStaffList = status === 'all' || status === '*'
+  const now = new Date()
+
+  if (isStaffList) {
     /* staff list: mọi trạng thái */
   } else if (status) {
     filter.status = status
+    if (status === 'active') {
+      filter.startDate = { $lte: now }
+      filter.endDate = { $gte: now }
+    }
   } else {
     filter.status = 'active'
+    filter.startDate = { $lte: now }
+    filter.endDate = { $gte: now }
   }
 
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
   const total = await Challenge.countDocuments(filter)
-  const challenges = await Challenge.find(filter).sort({ startDate: -1 }).skip(skip).limit(perPage)
+  const challenges = await Challenge.find(filter).sort({ endDate: 1, startDate: -1 }).skip(skip).limit(perPage)
+  const stats = await getChallengeStatsMap(challenges.map((c) => c._id))
 
   return {
-    challenges: challenges.map(c => new ChallengeDTO(c)),
+    challenges: challenges.map((c) => toChallengeDTO(c, stats)),
     pagination: getPagination({ page, limit: perPage, total }),
   }
 }
@@ -44,7 +148,8 @@ export const getChallenges = async ({ type, skill, status, page = 1, limit = 10 
 export const getChallengeById = async (challengeId) => {
   const challenge = await Challenge.findById(challengeId)
   if (!challenge) throw new Error('CHALLENGE_NOT_FOUND')
-  return new ChallengeDTO(challenge)
+  const stats = await getChallengeStatsMap([challenge._id])
+  return toChallengeDTO(challenge, stats)
 }
 
 /**
@@ -84,21 +189,9 @@ export const deleteChallenge = async (challengeId) => {
 export const joinChallenge = async (userId, challengeId) => {
   const challenge = await Challenge.findById(challengeId)
   if (!challenge) throw new Error('CHALLENGE_NOT_FOUND')
-  if (challenge.status !== 'active') throw new Error('CHALLENGE_NOT_ACTIVE')
+  if (!isChallengeLive(challenge)) throw new Error('CHALLENGE_NOT_ACTIVE')
 
-  const existing = await ChallengeParticipant.findOne({ challengeId, userId })
-  if (existing) throw new Error('ALREADY_JOINED')
-
-  const participant = await ChallengeParticipant.create({
-    challengeId,
-    userId,
-    target: challenge.requirement?.target || 0,
-    progress: 0,
-    completed: false,
-    joinedAt: new Date(),
-  })
-
-  await Challenge.findByIdAndUpdate(challengeId, { $inc: { participantCount: 1 } })
+  const { participant } = await ensureChallengeParticipant(userId, challenge, { requireNew: true })
   return new ChallengeParticipantDTO(participant)
 }
 
@@ -108,26 +201,12 @@ export const joinChallenge = async (userId, challengeId) => {
 export const updateChallengeProgress = async (userId, challengeId, { progress }) => {
   const challenge = await Challenge.findById(challengeId)
   if (!challenge) throw new Error('CHALLENGE_NOT_FOUND')
-  const now = new Date()
-  if (
-    challenge.status !== 'active'
-    || (challenge.startDate && challenge.startDate > now)
-    || (challenge.endDate && challenge.endDate < now)
-  ) {
-    throw new Error('CHALLENGE_NOT_ACTIVE')
-  }
+  if (!isChallengeLive(challenge)) throw new Error('CHALLENGE_NOT_ACTIVE')
 
   let participant = await ChallengeParticipant.findOne({ challengeId, userId })
   if (!participant) {
-    participant = await ChallengeParticipant.create({
-      challengeId,
-      userId,
-      target: challenge.requirement?.target || 0,
-      progress: 0,
-      completed: false,
-      joinedAt: now,
-    })
-    await Challenge.findByIdAndUpdate(challengeId, { $inc: { participantCount: 1 } })
+    const ensured = await ensureChallengeParticipant(userId, challenge)
+    participant = ensured.participant
   }
 
   const nextProgress = Number(progress)
@@ -172,16 +251,9 @@ export const incrementChallengeProgressByRequirement = async (userId, requiremen
     const challengeId = challenge._id.toString()
     let participant = participantMap.get(challengeId)
     if (!participant) {
-      participant = await ChallengeParticipant.create({
-        challengeId: challenge._id,
-        userId,
-        target: challenge.requirement?.target || 0,
-        progress: 0,
-        completed: false,
-        joinedAt: now,
-      })
+      const ensured = await ensureChallengeParticipant(userId, challenge)
+      participant = ensured.participant
       participantMap.set(challengeId, participant)
-      await Challenge.findByIdAndUpdate(challenge._id, { $inc: { participantCount: 1 } })
     }
     if (participant.completed) continue
 
@@ -249,6 +321,15 @@ export const getUserChallenges = async (userId, { page = 1, limit = 10 }) => {
   }
 
   const merged = Array.from(mergedByChallengeId.values())
+  const stats = await getChallengeStatsMap(
+    merged.map((row) => row.challenge?._id || row.challenge?.id || row.challengeId).filter(Boolean),
+  )
+  for (const row of merged) {
+    if (row.challenge) {
+      row.challenge = toChallengeDTO(row.challenge, stats)
+    }
+  }
+
   const total = merged.length
   const rows = merged.slice(skip, skip + perPage)
 

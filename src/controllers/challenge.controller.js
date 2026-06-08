@@ -97,6 +97,18 @@ export const getUserChallenges = async (req, res, next) => {
   }
 }
 
+export const registerChallengesVisit = async (req, res, next) => {
+  try {
+    const result = await challengeService.registerActiveChallengesVisit(req.userId)
+    return sendSuccess(res, {
+      messageKey: 'challenge.registerVisitSuccess',
+      data: result,
+    }, req)
+  } catch (error) {
+    next(error)
+  }
+}
+
 export const getChallengeLeaderboard = async (req, res, next) => {
   try {
     const { page, limit } = req.query
