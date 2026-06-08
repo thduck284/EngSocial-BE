@@ -4,6 +4,7 @@ import { getPagination, getPaginationQuery } from '../utils/index.js'
 import { generateUniqueSlug } from '../utils/slug.js'
 import * as aiService from './ai.service.js'
 import * as mockTestService from './mockTest.service.js'
+import { pickSessionAttempt, submissionContentFromAttempt } from '../utils/sessionAttempt.js'
 import { bumpPeriodicQuestsOnLessonEvent } from './userPeriodicQuest.service.js'
 import { incrementChallengeProgressByRequirement } from './challenge.service.js'
 
@@ -936,10 +937,55 @@ export const gradeUserWriting = async (lessonId, userId, { score, feedback, atte
 
   return progress
 }
+
+function applyAiResultToSubmission(submission, aiResult) {
+  if (!submission) return
+  submission.aiScore = aiResult.score
+  submission.aiFeedback = aiResult.feedback
+  submission.aiStrengths = aiResult.strengths || []
+  submission.aiImprovements = aiResult.improvements || []
+  submission.aiGrammarErrors = aiResult.grammarErrors || []
+  submission.aiBreakdown = aiResult.breakdown || null
+}
+
+/** Resolve writing text for AI grade — mock test uses sessionCompletedAt like enrichSessionLessonResults. */
+function findWritingSubmissionSource(progress, { attemptNo, sessionCompletedAt, skill = 'writing' } = {}) {
+  if (sessionCompletedAt) {
+    const sessionAtt = pickSessionAttempt(progress, skill, sessionCompletedAt)
+    const content = submissionContentFromAttempt(sessionAtt)
+    if (content) {
+      return { content, attempt: sessionAtt, attemptNo: sessionAtt.attemptNo }
+    }
+  }
+
+  const attempts = Array.isArray(progress.attemptHistory) ? progress.attemptHistory : []
+
+  if (attemptNo != null && attemptNo !== '') {
+    const att = attempts.find((a) => Number(a.attemptNo) === Number(attemptNo))
+    const content = submissionContentFromAttempt(att)
+    if (content) return { content, attempt: att, attemptNo: att.attemptNo }
+  }
+
+  const topContent = progress.submission?.content?.trim()
+  if (topContent) {
+    return { content: topContent, attempt: null, attemptNo: null }
+  }
+
+  for (let i = attempts.length - 1; i >= 0; i--) {
+    const att = attempts[i]
+    const content = submissionContentFromAttempt(att)
+    if (content) {
+      return { content, attempt: att, attemptNo: att.attemptNo }
+    }
+  }
+
+  return null
+}
+
 /**
  * Process AI grading for a specific submission (Admin/Mod)
  */
-export const aiGradeWriting = async (lessonId, userId) => {
+export const aiGradeWriting = async (lessonId, userId, { attemptNo, sessionCompletedAt } = {}) => {
   const progress = await UserLessonProgress.findOne({ lessonId, userId })
   if (!progress) {
     const err = new Error('PROGRESS_NOT_FOUND')
@@ -954,11 +1000,18 @@ export const aiGradeWriting = async (lessonId, userId) => {
     throw err
   }
 
-  const userContent =
-    progress.submission?.content?.trim() ||
-    progress.attemptHistory?.[progress.attemptHistory.length - 1]?.submission?.content?.trim()
+  if (lesson.skill !== 'writing') {
+    const err = new Error('LESSON_NOT_WRITING')
+    err.status = 400
+    throw err
+  }
 
-  if (!userContent) {
+  const source = findWritingSubmissionSource(progress, {
+    attemptNo,
+    sessionCompletedAt,
+    skill: lesson.skill,
+  })
+  if (!source?.content) {
     const err = new Error('NO_SUBMISSION_CONTENT')
     err.status = 400
     throw err
@@ -966,28 +1019,25 @@ export const aiGradeWriting = async (lessonId, userId) => {
 
   const prompt = lesson.content?.prompt || lesson.title || lesson.topic || 'General Writing'
 
-  const aiResult = await aiService.gradeWriting(prompt, userContent, {
+  const aiResult = await aiService.gradeWriting(prompt, source.content, {
     level: lesson.level,
     wordLimit: lesson.content?.wordLimit,
   })
 
   if (!progress.submission) progress.submission = {}
-  progress.submission.aiScore = aiResult.score
-  progress.submission.aiFeedback = aiResult.feedback
-  progress.submission.aiStrengths = aiResult.strengths || []
-  progress.submission.aiImprovements = aiResult.improvements || []
-  progress.submission.aiGrammarErrors = aiResult.grammarErrors || []
-  progress.submission.aiBreakdown = aiResult.breakdown || null
+  applyAiResultToSubmission(progress.submission, aiResult)
 
-  if (progress.attemptHistory.length > 0) {
-    const lastAttempt = progress.attemptHistory[progress.attemptHistory.length - 1]
-    if (!lastAttempt.submission) lastAttempt.submission = {}
-    lastAttempt.submission.aiScore = aiResult.score
-    lastAttempt.submission.aiFeedback = aiResult.feedback
-    lastAttempt.submission.aiStrengths = aiResult.strengths || []
-    lastAttempt.submission.aiImprovements = aiResult.improvements || []
-    lastAttempt.submission.aiGrammarErrors = aiResult.grammarErrors || []
-    lastAttempt.submission.aiBreakdown = aiResult.breakdown || null
+  if (source.attempt) {
+    if (!source.attempt.submission) source.attempt.submission = {}
+    applyAiResultToSubmission(source.attempt.submission, aiResult)
+  } else if (progress.attemptHistory.length > 0) {
+    const lastWriting = [...progress.attemptHistory]
+      .reverse()
+      .find((a) => a?.submission?.content?.trim())
+    if (lastWriting) {
+      if (!lastWriting.submission) lastWriting.submission = {}
+      applyAiResultToSubmission(lastWriting.submission, aiResult)
+    }
   }
 
   await progress.save()

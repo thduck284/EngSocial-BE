@@ -2,6 +2,7 @@ import MockTestResult from '../models/learning/MockTestResult.js'
 import UserLessonProgress from '../models/learning/UserLessonProgress.js'
 import { User } from '../models/index.js'
 import { regradeProgressQuizAttempts } from './lesson.service.js'
+import { isWritingAttempt, pickSessionAttempt } from '../utils/sessionAttempt.js'
 
 function getProgressSkill(progress, lessonsMeta = []) {
   const fromLesson = progress.lessonId?.skill
@@ -11,44 +12,6 @@ function getProgressSkill(progress, lessonsMeta = []) {
     (l) => String(l.lessonId?._id || l.lessonId || l.id) === String(lessonRef),
   )
   return meta?.skill || null
-}
-
-function isWritingAttempt(att) {
-  if (!att) return false
-  return att.type === 'writing' || (att.submission?.content != null && !Array.isArray(att.answers))
-}
-
-function isQuizAttempt(att) {
-  if (!att || isWritingAttempt(att)) return false
-  return Array.isArray(att.answers) && att.answers.length > 0
-}
-
-/** Latest attempt for this mock test session (ignores later retakes on the same lesson). */
-function pickSessionAttempt(progress, skill, sessionCompletedAt) {
-  const attempts = Array.isArray(progress.attemptHistory) ? progress.attemptHistory : []
-  const cutoffMs = sessionCompletedAt
-    ? new Date(sessionCompletedAt).getTime() + 5 * 60 * 1000
-    : null
-
-  const filtered = attempts.filter((att) => {
-    if (skill === 'writing') return isWritingAttempt(att)
-    // Include quiz attempts even when answers[] is empty (auto-submit / timer expiry)
-    return att.type === 'quiz' || (Array.isArray(att.answers) && !isWritingAttempt(att))
-  })
-
-  if (filtered.length === 0) return null
-  if (!cutoffMs) return filtered[filtered.length - 1]
-
-  let chosen = null
-  let chosenTime = -1
-  for (const att of filtered) {
-    const t = att.submittedAt ? new Date(att.submittedAt).getTime() : 0
-    if (t <= cutoffMs && t >= chosenTime) {
-      chosen = att
-      chosenTime = t
-    }
-  }
-  return chosen || filtered[filtered.length - 1]
 }
 
 function mapSessionParts(lessonResults = [], lessonsMeta = []) {
