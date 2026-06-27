@@ -4,6 +4,8 @@ import { getPagination, getPaginationQuery } from '../utils/index.js'
 import { generateUniqueSlug } from '../utils/slug.js'
 import * as aiService from './ai.service.js'
 import * as mockTestService from './mockTest.service.js'
+import { pickSessionAttempt, submissionContentFromAttempt, resolveSessionAttemptWindow, isAttemptInSessionWindow } from '../utils/sessionAttempt.js'
+import MockTestResult from '../models/learning/MockTestResult.js'
 import { bumpPeriodicQuestsOnLessonEvent } from './userPeriodicQuest.service.js'
 import { incrementChallengeProgressByRequirement } from './challenge.service.js'
 
@@ -318,7 +320,7 @@ export const submitWriting = async (userId, lessonId, { content, wordCount, time
 
   // Trigger AI grading automatically for immediate feedback
   try {
-    await aiGradeWriting(lessonId, userId)
+    await aiGradeWriting(lessonId, userId, { attemptNo: progress.attempts })
     // Reload progress to get AI results
     const updatedProgress = await UserLessonProgress.findOne({ userId, lessonId })
     return new UserLessonProgressDTO(updatedProgress)
@@ -936,46 +938,173 @@ export const gradeUserWriting = async (lessonId, userId, { score, feedback, atte
 
   return progress
 }
+
+function applyAiResultToSubmission(submission, aiResult) {
+  if (!submission) return
+  submission.aiScore = aiResult.score
+  submission.aiFeedback = aiResult.feedback
+  submission.aiStrengths = aiResult.strengths || []
+  submission.aiImprovements = aiResult.improvements || []
+  submission.aiGrammarErrors = aiResult.grammarErrors || []
+  submission.aiBreakdown = aiResult.breakdown || null
+}
+
+/** Giữ nội dung bài viết khi chỉ cập nhật điểm AI (tránh submission rỗng sau save). */
+function preserveSubmissionText(submission, sourceContent, sourceSubmission) {
+  if (!submission) return
+  if (sourceContent && !String(submission.content ?? '').trim()) {
+    submission.content = sourceContent
+  }
+  if (!sourceSubmission) return
+  if (sourceSubmission.wordCount != null && submission.wordCount == null) {
+    submission.wordCount = sourceSubmission.wordCount
+  }
+  if (sourceSubmission.submittedAt && !submission.submittedAt) {
+    submission.submittedAt = sourceSubmission.submittedAt
+  }
+}
+
+async function resolveMockTestAttemptWindow(progressId, sessionCompletedAt) {
+  if (!sessionCompletedAt || !progressId) return null
+
+  const targetMs = new Date(sessionCompletedAt).getTime()
+  const sessions = await MockTestResult.find({ lessonResults: progressId })
+    .populate({
+      path: 'lessonResults',
+      populate: { path: 'lessonId', select: 'skill' },
+    })
+    .lean()
+
+  if (sessions.length === 0) return null
+
+  const session = sessions.find((s) => {
+    const ms = new Date(s.completedAt).getTime()
+    return Math.abs(ms - targetMs) <= 2 * 60 * 1000
+  }) ?? sessions.sort(
+    (a, b) => Math.abs(new Date(a.completedAt).getTime() - targetMs)
+      - Math.abs(new Date(b.completedAt).getTime() - targetMs),
+  )[0]
+
+  if (!session?.lessonResults?.length) return null
+  return resolveSessionAttemptWindow(session.lessonResults, sessionCompletedAt)
+}
+
+/** Resolve writing text for AI grade — mock test uses sessionCompletedAt like enrichSessionLessonResults. */
+async function findWritingSubmissionSource(progress, { attemptNo, sessionCompletedAt, skill = 'writing' } = {}) {
+  const attempts = Array.isArray(progress.attemptHistory) ? progress.attemptHistory : []
+  const hasSession = sessionCompletedAt != null && sessionCompletedAt !== ''
+  const hasAttemptNo = attemptNo != null && attemptNo !== ''
+  const attemptWindow = hasSession
+    ? await resolveMockTestAttemptWindow(progress._id, sessionCompletedAt)
+    : null
+
+  // Mock test: chỉ chấm attempt thuộc phiên, không fallback bài cũ
+  if (hasSession) {
+    if (hasAttemptNo) {
+      const att = attempts.find((a) => Number(a.attemptNo) === Number(attemptNo))
+      if (!att) return null
+      if (attemptWindow && !isAttemptInSessionWindow(att, attemptWindow)) return null
+      const content = submissionContentFromAttempt(att)
+      if (!content) return null
+      return { content, attempt: att, attemptNo: att.attemptNo }
+    }
+
+    const sessionAtt = pickSessionAttempt(progress, skill, sessionCompletedAt, attemptWindow)
+    if (!sessionAtt) return null
+    const content = submissionContentFromAttempt(sessionAtt)
+    if (!content) return null
+    return { content, attempt: sessionAtt, attemptNo: sessionAtt.attemptNo }
+  }
+
+  if (hasAttemptNo) {
+    const att = attempts.find((a) => Number(a.attemptNo) === Number(attemptNo))
+    if (!att) return null
+    const content = submissionContentFromAttempt(att)
+    if (!content) return null
+    return { content, attempt: att, attemptNo: att.attemptNo }
+  }
+
+  const topContent = progress.submission?.content?.trim()
+  if (topContent) {
+    return { content: topContent, attempt: null, attemptNo: null }
+  }
+
+  for (let i = attempts.length - 1; i >= 0; i--) {
+    const att = attempts[i]
+    const content = submissionContentFromAttempt(att)
+    if (content) {
+      return { content, attempt: att, attemptNo: att.attemptNo }
+    }
+  }
+
+  return null
+}
+
 /**
  * Process AI grading for a specific submission (Admin/Mod)
  */
-export const aiGradeWriting = async (lessonId, userId) => {
+export const aiGradeWriting = async (lessonId, userId, { attemptNo, sessionCompletedAt } = {}) => {
   const progress = await UserLessonProgress.findOne({ lessonId, userId })
-  if (!progress) throw new Error('PROGRESS_NOT_FOUND')
+  if (!progress) {
+    const err = new Error('PROGRESS_NOT_FOUND')
+    err.status = 404
+    throw err
+  }
 
   const lesson = await Lesson.findById(lessonId)
-  if (!lesson) throw new Error('LESSON_NOT_FOUND')
+  if (!lesson) {
+    const err = new Error('LESSON_NOT_FOUND')
+    err.status = 404
+    throw err
+  }
 
-  const userContent = progress.submission?.content
-  if (!userContent) throw new Error('NO_SUBMISSION_CONTENT')
+  if (lesson.skill !== 'writing') {
+    const err = new Error('LESSON_NOT_WRITING')
+    err.status = 400
+    throw err
+  }
 
-  // Prompt for AI context - use specific prompt if available
+  const source = await findWritingSubmissionSource(progress, {
+    attemptNo,
+    sessionCompletedAt,
+    skill: lesson.skill,
+  })
+  if (!source?.content) {
+    const err = new Error('NO_SUBMISSION_CONTENT')
+    err.status = 400
+    throw err
+  }
+
   const prompt = lesson.content?.prompt || lesson.title || lesson.topic || 'General Writing'
 
-  // Call AI Service with metadata
-  const aiResult = await aiService.gradeWriting(prompt, userContent, {
+  const aiResult = await aiService.gradeWriting(prompt, source.content, {
     level: lesson.level,
-    wordLimit: lesson.content?.wordLimit
+    wordLimit: lesson.content?.wordLimit,
   })
 
-  // Update progress with AI suggestions
-  progress.submission.aiScore = aiResult.score
-  progress.submission.aiFeedback = aiResult.feedback
-  progress.submission.aiStrengths = aiResult.strengths || []
-  progress.submission.aiImprovements = aiResult.improvements || []
-  progress.submission.aiGrammarErrors = aiResult.grammarErrors || []
-  progress.submission.aiBreakdown = aiResult.breakdown || null
+  const srcSub = source.attempt?.submission
 
-  // Also update last attempt in history
-  if (progress.attemptHistory.length > 0) {
-    const lastAttempt = progress.attemptHistory[progress.attemptHistory.length - 1]
-    lastAttempt.submission.aiScore = aiResult.score
-    lastAttempt.submission.aiFeedback = aiResult.feedback
-    lastAttempt.submission.aiStrengths = aiResult.strengths || []
-    lastAttempt.submission.aiImprovements = aiResult.improvements || []
-    lastAttempt.submission.aiGrammarErrors = aiResult.grammarErrors || []
-    lastAttempt.submission.aiBreakdown = aiResult.breakdown || null
+  if (!progress.submission) progress.submission = {}
+  preserveSubmissionText(progress.submission, source.content, srcSub)
+  applyAiResultToSubmission(progress.submission, aiResult)
+
+  if (source.attempt) {
+    if (!source.attempt.submission) source.attempt.submission = {}
+    preserveSubmissionText(source.attempt.submission, source.content, srcSub)
+    applyAiResultToSubmission(source.attempt.submission, aiResult)
+  } else if (progress.attemptHistory.length > 0) {
+    const lastWriting = [...progress.attemptHistory]
+      .reverse()
+      .find((a) => submissionContentFromAttempt(a))
+    if (lastWriting) {
+      if (!lastWriting.submission) lastWriting.submission = {}
+      preserveSubmissionText(lastWriting.submission, source.content, srcSub)
+      applyAiResultToSubmission(lastWriting.submission, aiResult)
+    }
   }
+
+  progress.markModified('submission')
+  progress.markModified('attemptHistory')
 
   await progress.save()
   return progress

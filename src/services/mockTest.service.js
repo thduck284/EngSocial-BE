@@ -2,6 +2,7 @@ import MockTestResult from '../models/learning/MockTestResult.js'
 import UserLessonProgress from '../models/learning/UserLessonProgress.js'
 import { User } from '../models/index.js'
 import { regradeProgressQuizAttempts } from './lesson.service.js'
+import { isWritingAttempt, pickSessionAttempt, resolveSessionAttemptWindow } from '../utils/sessionAttempt.js'
 
 function getProgressSkill(progress, lessonsMeta = []) {
   const fromLesson = progress.lessonId?.skill
@@ -11,44 +12,6 @@ function getProgressSkill(progress, lessonsMeta = []) {
     (l) => String(l.lessonId?._id || l.lessonId || l.id) === String(lessonRef),
   )
   return meta?.skill || null
-}
-
-function isWritingAttempt(att) {
-  if (!att) return false
-  return att.type === 'writing' || (att.submission?.content != null && !Array.isArray(att.answers))
-}
-
-function isQuizAttempt(att) {
-  if (!att || isWritingAttempt(att)) return false
-  return Array.isArray(att.answers) && att.answers.length > 0
-}
-
-/** Latest attempt for this mock test session (ignores later retakes on the same lesson). */
-function pickSessionAttempt(progress, skill, sessionCompletedAt) {
-  const attempts = Array.isArray(progress.attemptHistory) ? progress.attemptHistory : []
-  const cutoffMs = sessionCompletedAt
-    ? new Date(sessionCompletedAt).getTime() + 5 * 60 * 1000
-    : null
-
-  const filtered = attempts.filter((att) => {
-    if (skill === 'writing') return isWritingAttempt(att)
-    // Include quiz attempts even when answers[] is empty (auto-submit / timer expiry)
-    return att.type === 'quiz' || (Array.isArray(att.answers) && !isWritingAttempt(att))
-  })
-
-  if (filtered.length === 0) return null
-  if (!cutoffMs) return filtered[filtered.length - 1]
-
-  let chosen = null
-  let chosenTime = -1
-  for (const att of filtered) {
-    const t = att.submittedAt ? new Date(att.submittedAt).getTime() : 0
-    if (t <= cutoffMs && t >= chosenTime) {
-      chosen = att
-      chosenTime = t
-    }
-  }
-  return chosen || filtered[filtered.length - 1]
 }
 
 function mapSessionParts(lessonResults = [], lessonsMeta = []) {
@@ -118,29 +81,35 @@ function resolvePartMaxScore(progress, skill, sessionAttempt) {
   return max
 }
 
+function sessionAttemptWindow(lessonResults = [], lessonsMeta = [], sessionCompletedAt = null) {
+  if (!sessionCompletedAt) return null
+  return resolveSessionAttemptWindow(mapSessionParts(lessonResults, lessonsMeta), sessionCompletedAt)
+}
+
 function calcSessionTotals(lessonResults = [], lessonsMeta = [], sessionCompletedAt = null) {
   const parts = mapSessionParts(lessonResults, lessonsMeta)
+  const window = sessionAttemptWindow(lessonResults, lessonsMeta, sessionCompletedAt)
 
   const overallScore = parts.reduce((sum, p) => {
     const skill = getProgressSkill(p, lessonsMeta)
-    const sessionAttempt = pickSessionAttempt(p, skill, sessionCompletedAt)
+    const sessionAttempt = pickSessionAttempt(p, skill, sessionCompletedAt, window)
     return sum + resolvePartScore(p, skill, sessionAttempt)
   }, 0)
 
   // Max always sums every part in the mock test (writing = 100 even before instructor grading)
   const maxTotalScore = parts.reduce((sum, p) => {
     const skill = getProgressSkill(p, lessonsMeta)
-    const sessionAttempt = pickSessionAttempt(p, skill, sessionCompletedAt)
+    const sessionAttempt = pickSessionAttempt(p, skill, sessionCompletedAt, window)
     return sum + resolvePartMaxScore(p, skill, sessionAttempt)
   }, 0)
 
   return { overallScore, maxTotalScore }
 }
 
-function resolvePartTimeSpent(progress, skill, sessionCompletedAt) {
+function resolvePartTimeSpent(progress, skill, sessionCompletedAt, attemptWindow = null) {
   if (!progress) return 0
   if (skill && sessionCompletedAt) {
-    const att = pickSessionAttempt(progress, skill, sessionCompletedAt)
+    const att = pickSessionAttempt(progress, skill, sessionCompletedAt, attemptWindow)
     if (att?.timeSpent != null) {
       const sec = Number(att.timeSpent)
       if (Number.isFinite(sec) && sec >= 0) return sec
@@ -156,9 +125,10 @@ function resolvePartTimeSpent(progress, skill, sessionCompletedAt) {
 }
 
 function resolveSessionTimeSpent(session, lessonResults = [], lessonsMeta = []) {
+  const window = sessionAttemptWindow(lessonResults, lessonsMeta, session?.completedAt)
   const partSum = (lessonResults || []).reduce((sum, p) => {
     const skill = getProgressSkill(p, lessonsMeta)
-    return sum + resolvePartTimeSpent(p, skill, session?.completedAt)
+    return sum + resolvePartTimeSpent(p, skill, session?.completedAt, window)
   }, 0)
   if (partSum > 0) return partSum
   const stored = Number(session?.timeSpent)
@@ -166,8 +136,8 @@ function resolveSessionTimeSpent(session, lessonResults = [], lessonsMeta = []) 
   return 0
 }
 
-function isSessionPartGraded(progress, skill, sessionCompletedAt) {
-  const att = pickSessionAttempt(progress, skill, sessionCompletedAt)
+function isSessionPartGraded(progress, skill, sessionCompletedAt, attemptWindow = null) {
+  const att = pickSessionAttempt(progress, skill, sessionCompletedAt, attemptWindow)
   if (isWritingPartProgress(progress, skill, att)) {
     if (!att) return false
     return isInstructorGradedWriting(att)
@@ -183,25 +153,29 @@ function isSessionPartGraded(progress, skill, sessionCompletedAt) {
 function computeMockTestSessionStatus(lessonResults, lessonsMeta, sessionCompletedAt) {
   const parts = mapSessionParts(lessonResults, lessonsMeta)
   if (parts.length === 0) return 'completed'
+  const window = sessionAttemptWindow(lessonResults, lessonsMeta, sessionCompletedAt)
   const allGraded = parts.every((p) =>
-    isSessionPartGraded(p, getProgressSkill(p, lessonsMeta), sessionCompletedAt),
+    isSessionPartGraded(p, getProgressSkill(p, lessonsMeta), sessionCompletedAt, window),
   )
   return allGraded ? 'graded' : 'completed'
 }
 
 function enrichSessionLessonResults(lessonResults = [], lessonsMeta = [], sessionCompletedAt = null) {
+  const window = sessionAttemptWindow(lessonResults, lessonsMeta, sessionCompletedAt)
   return (lessonResults || []).map((progress) => {
     const skill = getProgressSkill(progress, lessonsMeta)
-    const sessionAttempt = pickSessionAttempt(progress, skill, sessionCompletedAt)
+    const sessionAttempt = pickSessionAttempt(progress, skill, sessionCompletedAt, window)
     const writingPart = isWritingPartProgress(progress, skill, sessionAttempt)
     const instructorGraded = writingPart ? isInstructorGradedWriting(sessionAttempt) : undefined
     return {
       ...progress,
       score: resolvePartScore(progress, skill, sessionAttempt),
       maxScore: resolvePartMaxScore(progress, skill, sessionAttempt),
-      timeSpent: resolvePartTimeSpent(progress, skill, sessionCompletedAt),
+      timeSpent: resolvePartTimeSpent(progress, skill, sessionCompletedAt, window),
       answers: sessionAttempt?.answers ?? progress.answers,
-      submission: sessionAttempt?.submission ?? progress.submission,
+      submission: sessionCompletedAt
+        ? (sessionAttempt?.submission ?? null)
+        : (sessionAttempt?.submission ?? progress.submission),
       instructorGraded,
       sessionAttemptNo: sessionAttempt?.attemptNo,
       // Session display: writing graded by instructor → show completed, not under_review from a later retake
@@ -223,6 +197,7 @@ function enrichMockTestSession(session) {
   const sessionStatus = totals
     ? computeMockTestSessionStatus(lessonResults, lessonsMeta, session.completedAt)
     : session.status
+  const window = sessionAttemptWindow(lessonResults, lessonsMeta, session.completedAt)
   return {
     ...session,
     ...(totals ? { overallScore: totals.overallScore, maxTotalScore: totals.maxTotalScore } : {}),
@@ -231,7 +206,7 @@ function enrichMockTestSession(session) {
     timeSpent,
     partTimeSpent: displayResults.map((p) => ({
       lessonId: p.lessonId?._id || p.lessonId,
-      timeSpent: p.timeSpent ?? resolvePartTimeSpent(p, getProgressSkill(p, lessonsMeta), session.completedAt),
+      timeSpent: p.timeSpent ?? resolvePartTimeSpent(p, getProgressSkill(p, lessonsMeta), session.completedAt, window),
     })),
   }
 }
@@ -251,8 +226,9 @@ export const recordSession = async (userId, payload) => {
   const completedAt = new Date()
 
   const { overallScore, maxTotalScore } = calcSessionTotals(progressEntries, lessons, completedAt)
+  const window = sessionAttemptWindow(progressEntries, lessons, completedAt)
   const timeSpentFromParts = progressEntries.reduce(
-    (sum, p) => sum + resolvePartTimeSpent(p, p.lessonId?.skill, completedAt),
+    (sum, p) => sum + resolvePartTimeSpent(p, p.lessonId?.skill, completedAt, window),
     0,
   )
   const timeSpent = Number(timeSpentInput) > 0 ? Number(timeSpentInput) : timeSpentFromParts

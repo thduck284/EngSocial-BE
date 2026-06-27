@@ -812,18 +812,30 @@ export const gradeUserWriting = async (req, res, next) => {
 export const aiGradeWriting = async (req, res, next) => {
   try {
     const { id, userId } = req.params
-    
-    // Check permission: owner or mod/admin
+    const { attemptNo, sessionCompletedAt } = req.body || {}
+
     if (req.userId !== userId && !req.isModerator && !req.isAdmin) {
       return sendError(res, { statusCode: 403, message: 'Forbidden' }, req)
     }
 
-    const result = await lessonService.aiGradeWriting(id, userId)
+    const result = await lessonService.aiGradeWriting(id, userId, { attemptNo, sessionCompletedAt })
     return sendSuccess(res, {
       message: 'AI grading completed',
       data: result,
     }, req)
   } catch (error) {
+    if (error.message === 'NO_SUBMISSION_CONTENT') {
+      return sendError(res, {
+        statusCode: 400,
+        message: 'Không tìm thấy bài viết đã nộp. Học viên cần nộp bài Writing trước khi chấm AI.',
+      }, req)
+    }
+    if (error.message === 'LESSON_NOT_WRITING') {
+      return sendError(res, {
+        statusCode: 400,
+        message: 'Chỉ áp dụng chấm AI cho bài học Writing.',
+      }, req)
+    }
     next(error)
   }
 }
