@@ -361,3 +361,80 @@ export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_chan
     throw new Error('EMAIL_SEND_FAILED')
   }
 }
+
+const DEFAULT_REPORT_HELP_URL = 'https://engsocial-fe.onrender.com/help'
+
+function reportHelpUrl() {
+  return (process.env.REPORT_HELP_URL || process.env.FRONTEND_HELP_URL || DEFAULT_REPORT_HELP_URL).trim()
+}
+
+/**
+ * Email thông báo kết quả xử lý báo cáo (admin → reporter / người bị báo cáo).
+ * @param {string} toEmail
+ * @param {{ name?: string, body: string, lang?: string }} opts
+ */
+export async function sendReportResolutionEmail(toEmail, { name, body, lang = 'vi' } = {}) {
+  if (!toEmail || !body?.trim()) return false
+
+  const helpLink = reportHelpUrl()
+  const subject = getMessage(lang, 'emailReport.resolutionSubject')
+  const tagline = getMessage(lang, 'emailReport.resolutionTagline')
+  const greeting = getMessage(lang, 'emailReport.resolutionGreeting', { name: name || toEmail })
+  const helpTitle = getMessage(lang, 'emailReport.resolutionHelpTitle')
+  const helpBody = getMessage(lang, 'emailReport.resolutionHelpBody')
+  const helpLinkLabel = getMessage(lang, 'emailReport.resolutionHelpLinkLabel')
+  const footer = getMessage(lang, 'emailReport.resolutionFooter')
+  const textBody = [greeting, body.trim(), '', helpTitle, helpBody, helpLink, footer].join('\n')
+
+  if (!transporter) {
+    // eslint-disable-next-line no-console
+    console.log('[email] SMTP chưa cấu hình. Report resolution (log only):', { toEmail, body: body.trim() })
+    return false
+  }
+
+  const safeTagline = escapeHtml(tagline)
+  const safeGreeting = escapeHtml(greeting)
+  const safeBody = escapeHtml(body.trim()).replace(/\n/g, '<br>')
+  const safeHelpTitle = escapeHtml(helpTitle)
+  const safeHelpBody = escapeHtml(helpBody)
+  const safeHelpLink = escapeHtml(helpLink)
+  const safeHelpLinkLabel = escapeHtml(helpLinkLabel)
+  const safeFooter = escapeHtml(footer)
+
+  return deliverEmail({
+    to: toEmail,
+    subject,
+    text: textBody,
+    html: `
+<!DOCTYPE html>
+<html lang="${lang}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:36px 16px 48px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 12px 40px rgba(79,70,229,0.12);border:1px solid #e2e8f0;">
+        <tr><td style="background:linear-gradient(135deg,#4f46e5 0%,#6366f1 45%,#7c3aed 100%);padding:28px 32px;">
+          <div style="font-size:22px;font-weight:800;color:#fff;">EngSocial</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.88);margin-top:8px;">${safeTagline}</div>
+        </td></tr>
+        <tr><td style="padding:28px 32px;">
+          <p style="margin:0 0 16px;font-size:17px;font-weight:600;color:#0f172a;">${safeGreeting}</p>
+          <p style="margin:0 0 24px;font-size:15px;line-height:1.65;color:#334155;">${safeBody}</p>
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background:#f8fafc;border-radius:14px;border:1px solid #e2e8f0;">
+            <tr><td style="padding:18px 20px;">
+              <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#334155;">${safeHelpTitle}</p>
+              <p style="margin:0 0 12px;font-size:14px;line-height:1.55;color:#475569;">${safeHelpBody}</p>
+              <a href="${safeHelpLink}" style="display:inline-block;padding:12px 20px;background:#4f46e5;color:#fff !important;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px;">${safeHelpLinkLabel}</a>
+              <p style="margin:12px 0 0;font-size:12px;color:#64748b;word-break:break-all;"><a href="${safeHelpLink}" style="color:#4f46e5;">${safeHelpLink}</a></p>
+            </td></tr>
+          </table>
+          <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">${safeFooter}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`.trim(),
+    logContext: 'report resolution',
+  })
+}

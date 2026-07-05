@@ -2,6 +2,12 @@ import Joi from 'joi'
 
 export const updateContentReportStatusSchema = Joi.object({
   status: Joi.string().valid('pending', 'reviewed', 'dismissed').required(),
+  reporterMessage: Joi.when('status', {
+    is: Joi.valid('reviewed', 'dismissed'),
+    then: Joi.string().trim().min(1).max(5000).required(),
+    otherwise: Joi.string().trim().max(5000).allow('', null).optional(),
+  }),
+  reportedUserMessage: Joi.string().trim().max(5000).allow('', null).optional(),
 })
 
 export const adminUpdateUserSchema = Joi.object({

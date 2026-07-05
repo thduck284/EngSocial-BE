@@ -71,6 +71,15 @@ const messages = {
       statusLabelBanned: 'Đã khóa',
       statusLabelPending: 'Chờ xử lý',
     },
+    emailReport: {
+      resolutionSubject: 'EngSocial — Cập nhật xử lý báo cáo nội dung',
+      resolutionTagline: 'Thông báo từ EngSocial',
+      resolutionGreeting: 'Xin chào {{name}},',
+      resolutionHelpTitle: 'Cần hỗ trợ hoặc cho rằng báo cáo bị sai?',
+      resolutionHelpBody: 'Nếu bạn cho rằng quyết định này chưa chính xác hoặc cần được giải thích thêm, vui lòng xem mục Trợ giúp:',
+      resolutionHelpLinkLabel: 'Mở Trợ giúp EngSocial',
+      resolutionFooter: 'Đây là email thông báo tự động từ EngSocial. Vui lòng không trả lời trực tiếp email này.',
+    },
     lesson: {
       fetchSuccess: 'Lấy danh sách bài học thành công',
       detailSuccess: 'Lấy chi tiết bài học thành công',
@@ -349,6 +358,15 @@ const messages = {
       statusLabelInactive: 'Inactive',
       statusLabelBanned: 'Locked',
       statusLabelPending: 'Pending',
+    },
+    emailReport: {
+      resolutionSubject: 'EngSocial — Content report update',
+      resolutionTagline: 'A message from EngSocial',
+      resolutionGreeting: 'Hello {{name}},',
+      resolutionHelpTitle: 'Need help or think the report was wrong?',
+      resolutionHelpBody: 'If you believe this decision is incorrect or you need more information, please visit our Help page:',
+      resolutionHelpLinkLabel: 'Open EngSocial Help',
+      resolutionFooter: 'This is an automated message from EngSocial. Please do not reply directly to this email.',
     },
     lesson: {
       fetchSuccess: 'Lessons retrieved successfully',

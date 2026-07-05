@@ -3,7 +3,7 @@ import { UserDTO, LessonDTO, PostDTO } from '../dto/index.js'
 import { getPagination, getPaginationQuery } from '../utils/index.js'
 import { hashPassword } from '../utils/index.js'
 import { indexUser, deleteUserFromIndex } from '../config/elasticsearch/userSearch.service.js'
-import { sendUserStatusChangeEmail, resolveAccountEmailLang, getAccountStatusLabels, getAccountStatusChangeDetail } from './email.service.js'
+import { sendUserStatusChangeEmail, sendReportResolutionEmail, resolveAccountEmailLang, getAccountStatusLabels, getAccountStatusChangeDetail } from './email.service.js'
 import * as notificationService from './notification.service.js'
 import { emitToUser } from '../config/socket.js'
 import { getMessage } from '../locales/messages.js'
@@ -634,7 +634,39 @@ function buildReportTargetPreview(report, maps) {
   return empty
 }
 
-function mapContentReportRow(r, targetPreview) {
+async function resolveReportedUserForReport(report) {
+  const reporterId = String(report.reporterId?._id || report.reporterId || '')
+  const maps = await loadReportTargetMaps([report])
+  const preview = buildReportTargetPreview(report, maps)
+
+  if (report.targetType === 'user') {
+    const u = maps.users.get(String(report.targetId))
+    if (!u?.email) return null
+    return { id: String(u._id), name: u.name, email: u.email }
+  }
+
+  if (preview.author?.email) {
+    const authorId = String(preview.author.id || '')
+    if (authorId && authorId !== reporterId) {
+      return { id: authorId, name: preview.author.name, email: preview.author.email }
+    }
+  }
+
+  if (report.targetType === 'conversation') {
+    const conv = maps.conversations.get(String(report.targetId))
+    const participant = (conv?.participants || []).find((p) => {
+      const id = String(p?._id || p || '')
+      return id && id !== reporterId && p?.email
+    })
+    if (participant && typeof participant === 'object') {
+      return { id: String(participant._id), name: participant.name, email: participant.email }
+    }
+  }
+
+  return null
+}
+
+function mapContentReportRow(r, targetPreview, reportedUser = null) {
   return {
     id: r._id.toString(),
     reporter: r.reporterId
@@ -654,6 +686,7 @@ function mapContentReportRow(r, targetPreview) {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     targetPreview,
+    reportedUser,
   }
 }
 
@@ -696,7 +729,8 @@ export const getContentReportById = async (reportId) => {
   const maps = await loadReportTargetMaps([row])
   const basePreview = buildReportTargetPreview(row, maps)
   const targetPreview = await enrichReportTargetPreviewForDetail(row, basePreview)
-  return mapContentReportRow(row, targetPreview)
+  const reportedUser = await resolveReportedUserForReport(row)
+  return mapContentReportRow(row, targetPreview, reportedUser)
 }
 
 /**
@@ -705,7 +739,11 @@ export const getContentReportById = async (reportId) => {
  * @param {{ status: string }} body
  * @param {{ notifyLang?: string, io?: import('socket.io').Server }} [opts]
  */
-export const updateContentReportStatus = async (reportId, { status }, opts = {}) => {
+export const updateContentReportStatus = async (
+  reportId,
+  { status, reporterMessage, reportedUserMessage },
+  opts = {},
+) => {
   if (!['pending', 'reviewed', 'dismissed'].includes(status)) {
     throw new Error('INVALID_REPORT_STATUS')
   }
@@ -727,6 +765,37 @@ export const updateContentReportStatus = async (reportId, { status }, opts = {})
   }).catch((err) => {
     console.error('[admin] notifyReporterReportStatusChange failed:', err?.message || err)
   })
+
+  if (status === 'reviewed' || status === 'dismissed') {
+    const reportLean = await ContentReport.findById(reportId)
+      .populate('reporterId', 'name email preferences.language')
+      .lean()
+    const reportedUser = reportLean ? await resolveReportedUserForReport(reportLean) : null
+    const notifyLang = opts.notifyLang || 'vi'
+
+    if (reporterMessage?.trim() && reportLean?.reporterId?.email) {
+      const lang = resolveAccountEmailLang(reportLean.reporterId, notifyLang)
+      void sendReportResolutionEmail(reportLean.reporterId.email, {
+        name: reportLean.reporterId.name,
+        body: reporterMessage.trim(),
+        lang,
+      }).catch((err) => {
+        console.error('[admin] sendReportResolutionEmail reporter failed:', err?.message || err)
+      })
+    }
+
+    if (reportedUserMessage?.trim() && reportedUser?.email) {
+      const reportedDoc = await User.findById(reportedUser.id).select('name email preferences.language').lean()
+      const lang = resolveAccountEmailLang(reportedDoc || reportedUser, notifyLang)
+      void sendReportResolutionEmail(reportedUser.email, {
+        name: reportedUser.name,
+        body: reportedUserMessage.trim(),
+        lang,
+      }).catch((err) => {
+        console.error('[admin] sendReportResolutionEmail reported user failed:', err?.message || err)
+      })
+    }
+  }
 
   return { id: report._id.toString(), status: report.status }
 }
