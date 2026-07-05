@@ -277,6 +277,21 @@ async function notifyReporterReportStatusChange(io, report, { prevStatus, newSta
   return notification
 }
 
+function defaultReportResolutionEmailBody(lang, report, status, recipient) {
+  const targetTypeLabel = getReportTargetTypeLabel(lang, report.targetType)
+  const { message } = getReportStatusNotificationContent(lang, {
+    newStatus: status,
+    targetTypeLabel,
+    prevLabel: getMessage(lang, REPORT_STATUS_LABEL_KEYS.pending),
+    newLabel: getMessage(lang, REPORT_STATUS_LABEL_KEYS[status] || REPORT_STATUS_LABEL_KEYS.pending),
+  })
+  if (recipient === 'reported' && status === 'dismissed') {
+    const helpUrl = (process.env.REPORT_HELP_URL || process.env.FRONTEND_HELP_URL || 'https://engsocial-fe.onrender.com/help').trim()
+    return `${message} ${getMessage(lang, 'emailReport.resolutionHelpBody')} ${helpUrl}`
+  }
+  return message
+}
+
 /**
  * Update user status (admin) - ban/activate
  * @param {string} userId
@@ -773,23 +788,29 @@ export const updateContentReportStatus = async (
     const reportedUser = reportLean ? await resolveReportedUserForReport(reportLean) : null
     const notifyLang = opts.notifyLang || 'vi'
 
-    if (reporterMessage?.trim() && reportLean?.reporterId?.email) {
+    if (reportLean?.reporterId?.email) {
       const lang = resolveAccountEmailLang(reportLean.reporterId, notifyLang)
+      const body =
+        reporterMessage?.trim() ||
+        defaultReportResolutionEmailBody(lang, reportLean, status, 'reporter')
       void sendReportResolutionEmail(reportLean.reporterId.email, {
         name: reportLean.reporterId.name,
-        body: reporterMessage.trim(),
+        body,
         lang,
       }).catch((err) => {
         console.error('[admin] sendReportResolutionEmail reporter failed:', err?.message || err)
       })
     }
 
-    if (reportedUserMessage?.trim() && reportedUser?.email) {
+    if (reportedUser?.email) {
       const reportedDoc = await User.findById(reportedUser.id).select('name email preferences.language').lean()
       const lang = resolveAccountEmailLang(reportedDoc || reportedUser, notifyLang)
+      const body =
+        reportedUserMessage?.trim() ||
+        defaultReportResolutionEmailBody(lang, reportLean, status, 'reported')
       void sendReportResolutionEmail(reportedUser.email, {
         name: reportedUser.name,
-        body: reportedUserMessage.trim(),
+        body,
         lang,
       }).catch((err) => {
         console.error('[admin] sendReportResolutionEmail reported user failed:', err?.message || err)
