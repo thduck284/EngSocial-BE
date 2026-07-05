@@ -1,13 +1,14 @@
 import nodemailer from 'nodemailer'
 import { getMessage } from '../locales/messages.js'
 
-const SMTP_HOST = process.env.SMTP_HOST
+const SMTP_HOST = (process.env.SMTP_HOST || '').trim()
 const SMTP_PORT = parseInt(process.env.SMTP_PORT || '587', 10)
-const SMTP_FROM = process.env.SMTP_FROM
+const SMTP_FROM = (process.env.SMTP_FROM || '').trim()
+const SMTP_USER = (process.env.SMTP_USER || SMTP_FROM || '').trim()
 const SMTP_PASS = (process.env.SMTP_PASS || '').replace(/\s+/g, '')
 const SMTP_TLS_INSECURE = process.env.SMTP_TLS_INSECURE === '1'
 
-const hasSmtpConfig = SMTP_HOST && SMTP_FROM && SMTP_PASS
+const hasSmtpConfig = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS && SMTP_FROM)
 
 let transporter = null
 if (hasSmtpConfig) {
@@ -16,19 +17,44 @@ if (hasSmtpConfig) {
     port: SMTP_PORT,
     secure: SMTP_PORT === 465,
     auth: {
-      user: SMTP_FROM,
+      user: SMTP_USER,
       pass: SMTP_PASS,
     },
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 20_000,
     ...(SMTP_TLS_INSECURE ? { tls: { rejectUnauthorized: false } } : {}),
   })
+  // eslint-disable-next-line no-console
+  console.log(`[email] SMTP ready (${SMTP_HOST}:${SMTP_PORT})`)
+} else {
+  // eslint-disable-next-line no-console
+  console.warn('[email] SMTP chưa cấu hình — email sẽ chỉ log ra console (dev)')
+}
+
+async function deliverEmail({ to, subject, text, html, throwOnError = false, logContext = 'email' }) {
+  if (!transporter) return false
+
+  try {
+    await transporter.sendMail({
+      from: `"EngSocial" <${SMTP_FROM}>`,
+      to,
+      subject,
+      text,
+      html,
+    })
+    return true
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[email] Gửi thất bại (${logContext}):`, err.message)
+    if (throwOnError) throw err
+    return false
+  }
 }
 
 /**
  * Gửi email chứa link đặt lại mật khẩu.
  * Nếu chưa cấu hình SMTP thì chỉ log link ra console (dùng cho dev).
- * @param {string} toEmail - Email người nhận
- * @param {string} resetLink - URL đầy đủ đến trang reset (ví dụ https://.../reset-password?token=...)
- * @param {string} [lang='vi'] - Ngôn ngữ nội dung email (vi | en)
  */
 export async function sendPasswordResetEmail(toEmail, resetLink, lang = 'vi') {
   const subject = getMessage(lang, 'auth.emailResetSubject')
@@ -44,13 +70,11 @@ export async function sendPasswordResetEmail(toEmail, resetLink, lang = 'vi') {
   const linkLabel = getMessage(lang, 'auth.emailResetLinkLabel')
   const copyHint = getMessage(lang, 'auth.emailResetCopyHint')
 
-  try {
-    await transporter.sendMail({
-      from: `"EngSocial" <${SMTP_FROM}>`,
-      to: toEmail,
-      subject,
-      text: textBody,
-      html: `
+  await deliverEmail({
+    to: toEmail,
+    subject,
+    text: textBody,
+    html: `
 <!DOCTYPE html>
 <html>
 <head>
@@ -72,13 +96,10 @@ export async function sendPasswordResetEmail(toEmail, resetLink, lang = 'vi') {
   </table>
 </body>
 </html>
-      `.trim(),
-    })
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[email] Gửi email thất bại:', err.message)
-    throw err
-  }
+    `.trim(),
+    throwOnError: true,
+    logContext: 'password reset',
+  })
 }
 
 const STATUS_LABEL_KEYS = {
@@ -139,11 +160,7 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;')
 }
 
-/**
- * Thông báo user khi admin đổi trạng thái tài khoản. Không throw — chỉ log nếu lỗi SMTP.
- * @param {import('mongoose').Document} userDoc - User đã save (có email, name, preferences)
- * @param {{ prevStatus: string, newStatus: string, notifyLang?: string }} opts
- */
+/** Thông báo user khi admin đổi trạng thái tài khoản. Không throw — chỉ log nếu lỗi SMTP. */
 export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus, notifyLang = 'vi' }) {
   const toEmail = userDoc?.email
   if (!toEmail || prevStatus === newStatus) return
@@ -193,13 +210,11 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
   const safeContactHours = escapeHtml(contact.hours)
   const safeContactWebsite = escapeHtml(contact.website)
 
-  try {
-    await transporter.sendMail({
-      from: `"EngSocial" <${SMTP_FROM}>`,
-      to: toEmail,
-      subject,
-      text: textBody,
-      html: `
+  await deliverEmail({
+    to: toEmail,
+    subject,
+    text: textBody,
+    html: `
 <!DOCTYPE html>
 <html lang="${lang}">
 <head>
@@ -275,20 +290,15 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
   </table>
 </body>
 </html>
-      `.trim(),
-    })
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[email] Gửi thông báo đổi trạng thái tài khoản thất bại:', err.message)
-  }
+    `.trim(),
+    logContext: 'account status change',
+  })
 }
 
-/**
- * Gửi OTP xác minh đổi email hoặc xóa tài khoản.
- */
+/** Gửi OTP xác minh đổi email hoặc xóa tài khoản. */
 export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_change') {
   let subject, intro
-  
+
   if (type === 'delete_account') {
     subject = lang === 'en' ? 'EngSocial — Confirm Account Deletion' : 'EngSocial — Xác nhận xóa tài khoản'
     intro = lang === 'en'
@@ -305,7 +315,7 @@ export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_chan
       ? `Your OTP code to change your email address is:`
       : `Mã OTP để xác nhận đổi email của bạn là:`
   }
-  
+
   const expiry = lang === 'en' ? 'This code expires in 10 minutes.' : 'Mã có hiệu lực trong 10 phút.'
 
   if (!transporter) {
@@ -314,9 +324,7 @@ export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_chan
     return
   }
 
-  try {
-    await transporter.sendMail({
-    from: `"EngSocial" <${SMTP_FROM}>`,
+  const sent = await deliverEmail({
     to: toEmail,
     subject,
     text: `${intro} ${otp}\n${expiry}`,
@@ -344,13 +352,12 @@ export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_chan
   </table>
 </body>
 </html>`.trim(),
-    })
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[email] Gửi OTP thất bại:', err.message)
+    logContext: 'OTP',
+  })
+
+  if (!sent) {
     // eslint-disable-next-line no-console
     console.log(`[email] OTP (fallback log) for ${toEmail}: ${otp}`)
-    throw err
+    throw new Error('EMAIL_SEND_FAILED')
   }
 }
-

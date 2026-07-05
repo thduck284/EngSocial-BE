@@ -95,7 +95,8 @@ BE gọi endpoint Flask: `{CHAT_BOT_APP}/api/chat/stream`
 | `CLOUDINARY_*` | Cloud name, API key, secret |
 | `GOOGLE_CLIENT_ID` | Đăng nhập Google |
 | `FACEBOOK_APP_ID` / `FACEBOOK_APP_SECRET` | Đăng nhập Facebook |
-| `SMTP_*` | Gửi email (quên mật khẩu, xác thực) |
+| `SMTP_*` | Gửi email qua nodemailer (quên mật khẩu, OTP, đổi status) |
+| `SMTP_USER` | (Tuỳ chọn) User đăng nhập SMTP; mặc định = `SMTP_FROM` |
 | `ELASTICSEARCH_NODE` | (Tuỳ chọn) Tìm kiếm user |
 
 ### Server
@@ -193,7 +194,20 @@ Body mẫu:
 2. **Build command:** `npm install`
 3. **Start command:** `npm start`
 4. Thêm **Environment Variables** (giống `.env`, không dùng file `.env` trên cloud). **Bắt buộc thêm `GEMINI_API_KEY`** nếu dùng chấm Writing bằng AI (`POST /api/lessons/:id/ai-grade/:userId`).
-5. Bắt buộc cho chatbot trên Render:
+5. **Email trên Render free:** Render [chặn outbound SMTP port 587/465](https://render.com/changelog/free-web-services-will-no-longer-allow-outbound-traffic-to-smtp-ports) — Gmail SMTP sẽ `Connection timeout`. Dùng **Brevo SMTP relay port 2525** (vẫn nodemailer, free ~300 email/ngày):
+
+```env
+SMTP_HOST=smtp-relay.brevo.com
+SMTP_PORT=2525
+SMTP_USER=email-dang-ky-brevo@gmail.com
+SMTP_PASS=xsmtpsib-xxxxxxxx
+SMTP_FROM=email-sender-da-verify@gmail.com
+SMTP_TLS_INSECURE=1
+```
+
+Lấy `SMTP_PASS` tại Brevo → **SMTP & API → SMTP keys**. Verify sender email trong **Senders & IP**. Local dev vẫn dùng Gmail port 587 bình thường.
+
+6. Bắt buộc cho chatbot trên Render:
 
 ```env
 GEMINI_API_KEY=your-google-ai-studio-key
@@ -202,7 +216,7 @@ CHAT_BOT_TLS_INSECURE=1
 CORS_ORIGIN=https://your-frontend.onrender.com,http://localhost:3000
 ```
 
-6. **Manual Deploy** sau mỗi lần đổi env hoặc code.
+7. **Manual Deploy** sau mỗi lần đổi env hoặc code.
 
 ### Chatbot trên production — checklist
 

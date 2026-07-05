@@ -24,3 +24,7 @@ Thumbs.db
 # Build
 dist/
 build/
+
+# Database exports (có thể chứa dữ liệu nhạy cảm)
+exports/
+*.zip
