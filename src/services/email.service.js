@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer'
 import { getMessage } from '../locales/messages.js'
+import { formatStatusUntilForEmail, isRestrictedStatus } from '../utils/userStatus.util.js'
 
 const SMTP_HOST = (process.env.SMTP_HOST || '').trim()
 const SMTP_PORT = parseInt(process.env.SMTP_PORT || '587', 10)
@@ -161,9 +162,19 @@ function escapeHtml(s) {
 }
 
 /** Thông báo user khi admin đổi trạng thái tài khoản. Không throw — chỉ log nếu lỗi SMTP. */
-export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus, notifyLang = 'vi' }) {
+export async function sendUserStatusChangeEmail(userDoc, {
+  prevStatus,
+  newStatus,
+  notifyLang = 'vi',
+  statusUntil = null,
+  prevStatusUntil = null,
+}) {
   const toEmail = userDoc?.email
-  if (!toEmail || prevStatus === newStatus) return
+  const effectiveUntil = statusUntil ?? userDoc?.statusUntil ?? null
+  const prevUntilMs = prevStatusUntil ? new Date(prevStatusUntil).getTime() : null
+  const nextUntilMs = effectiveUntil ? new Date(effectiveUntil).getTime() : null
+  if (!toEmail) return
+  if (prevStatus === newStatus && prevUntilMs === nextUntilMs) return
 
   const lang = resolveAccountEmailLang(userDoc, notifyLang)
   const prevLabel = getMessage(lang, STATUS_LABEL_KEYS[prevStatus] || STATUS_LABEL_KEYS.pending)
@@ -174,6 +185,16 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
   const greeting = getMessage(lang, 'emailAccount.statusChangedGreeting', { name })
   const p1 = getMessage(lang, 'emailAccount.statusChangedP1', { prevLabel, newLabel })
   const p2 = getAccountStatusChangeDetail(lang, newStatus)
+  let pDuration = ''
+  if (isRestrictedStatus(newStatus)) {
+    if (effectiveUntil) {
+      pDuration = getMessage(lang, 'emailAccount.statusChangedDuration', {
+        expiresAt: formatStatusUntilForEmail(effectiveUntil, lang),
+      })
+    } else {
+      pDuration = getMessage(lang, 'emailAccount.statusChangedPermanent')
+    }
+  }
   const p3 = getAccountStatusChangeFooterNote(lang, newStatus)
   const contact = getAccountStatusChangeContact(lang)
   const footer = getMessage(lang, 'emailAccount.statusChangedFooter')
@@ -186,7 +207,7 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
     contact.hours,
     contact.website,
   ].join('\n')
-  const textBody = [greeting, p1, p2, p3, contactBlock, footer].join('\n\n')
+  const textBody = [greeting, p1, p2, pDuration, p3, contactBlock, footer].filter(Boolean).join('\n\n')
 
   if (!transporter) {
     // eslint-disable-next-line no-console
@@ -198,6 +219,7 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
   const safeGreeting = escapeHtml(greeting)
   const safeP1 = escapeHtml(p1)
   const safeP2 = escapeHtml(p2)
+  const safePDuration = pDuration ? escapeHtml(pDuration) : ''
   const safeP3 = escapeHtml(p3)
   const safePrev = escapeHtml(prevLabel)
   const safeNew = escapeHtml(newLabel)
@@ -252,6 +274,7 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
               </table>
               <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#334155;">${safeP1}</p>
               <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#475569;">${safeP2}</p>
+              ${safePDuration ? `<p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#475569;">${safePDuration}</p>` : ''}
               <p style="margin:0 0 28px;font-size:15px;line-height:1.65;color:#475569;">${safeP3}</p>
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background:#f8fafc;border-radius:14px;border:1px solid #e2e8f0;">
                 <tr>

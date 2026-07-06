@@ -1,6 +1,7 @@
+import mongoose from 'mongoose'
 import { User, Lesson, Post, Comment, ContentReport, RefreshToken, PasswordResetToken, Message, Conversation } from '../models/index.js'
 import { UserDTO, LessonDTO, PostDTO } from '../dto/index.js'
-import { getPagination, getPaginationQuery } from '../utils/index.js'
+import { getPagination, getPaginationQuery, computeStatusUntil } from '../utils/index.js'
 import { hashPassword } from '../utils/index.js'
 import { indexUser, deleteUserFromIndex } from '../config/elasticsearch/userSearch.service.js'
 import { sendUserStatusChangeEmail, sendReportResolutionEmail, resolveAccountEmailLang, getAccountStatusLabels, getAccountStatusChangeDetail } from './email.service.js'
@@ -293,24 +294,46 @@ function defaultReportResolutionEmailBody(lang, report, status, recipient) {
 }
 
 /**
- * Update user status (admin) - ban/activate
+ * Update user status (admin) - ban/activate/suspend with optional duration
  * @param {string} userId
- * @param {{ status: string }} body
+ * @param {{ status: string, durationValue?: number, durationUnit?: string }} body
  * @param {{ notifyLang?: string, io?: import('socket.io').Server }} [opts]
  */
-export const updateUserStatus = async (userId, { status }, opts = {}) => {
+export const updateUserStatus = async (userId, { status, durationValue, durationUnit }, opts = {}) => {
   const notifyLang = opts.notifyLang || 'vi'
   const io = opts.io
   const user = await User.findById(userId)
   if (!user) throw new Error('USER_NOT_FOUND')
   if (!['active', 'inactive', 'banned', 'pending'].includes(status)) throw new Error('INVALID_STATUS')
+
   const prevStatus = user.status
-  if (prevStatus === status) {
+  const prevUntil = user.statusUntil?.getTime?.() ?? null
+
+  let statusUntil = null
+  if (status === 'active' || status === 'pending') {
+    statusUntil = null
+  } else if (['inactive', 'banned'].includes(status)) {
+    if (durationValue != null && durationUnit) {
+      statusUntil = computeStatusUntil(new Date(), durationValue, durationUnit)
+      if (!statusUntil) throw new Error('INVALID_DURATION')
+    }
+  }
+
+  const nextUntil = statusUntil?.getTime?.() ?? null
+  if (prevStatus === status && prevUntil === nextUntil) {
     return new UserDTO(user)
   }
+
   user.status = status
+  user.statusUntil = statusUntil
   await user.save()
-  void sendUserStatusChangeEmail(user, { prevStatus, newStatus: status, notifyLang })
+  void sendUserStatusChangeEmail(user, {
+    prevStatus,
+    newStatus: status,
+    notifyLang,
+    statusUntil: user.statusUntil,
+    prevStatusUntil: prevUntil != null ? new Date(prevUntil) : null,
+  })
   void notifyUserAccountStatusChange(io, user, { prevStatus, newStatus: status, notifyLang }).catch((err) => {
     console.error('[admin] notifyUserAccountStatusChange failed:', err?.message || err)
   })
@@ -708,12 +731,77 @@ function mapContentReportRow(r, targetPreview, reportedUser = null) {
 /**
  * Danh sách báo cáo (bảng ContentReport)
  */
-export const getContentReports = async ({ page = 1, limit = 20, status, targetType }) => {
+function escapeRegexText(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function parseReportDateStart(dateStr) {
+  if (!dateStr) return null
+  const d = new Date(`${String(dateStr).trim()}T00:00:00.000`)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+function parseReportDateEnd(dateStr) {
+  if (!dateStr) return null
+  const d = new Date(`${String(dateStr).trim()}T23:59:59.999`)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+async function buildContentReportFilter({ status, targetType, search, dateFrom, dateTo }) {
   const filter = {}
   if (status && ['pending', 'reviewed', 'dismissed'].includes(status)) filter.status = status
   if (targetType && ['post', 'message', 'conversation', 'user'].includes(targetType)) {
     filter.targetType = targetType
   }
+
+  const from = parseReportDateStart(dateFrom)
+  const to = parseReportDateEnd(dateTo)
+  if (from || to) {
+    filter.createdAt = {}
+    if (from) filter.createdAt.$gte = from
+    if (to) filter.createdAt.$lte = to
+  }
+
+  const q = search?.trim()
+  if (q) {
+    const or = [
+      { reason: { $regex: escapeRegexText(q), $options: 'i' } },
+      { details: { $regex: escapeRegexText(q), $options: 'i' } },
+    ]
+    if (mongoose.Types.ObjectId.isValid(q)) {
+      const oid = new mongoose.Types.ObjectId(q)
+      or.push({ targetId: oid })
+      or.push({ _id: oid })
+      or.push({ reporterId: oid })
+    }
+    const reporterRows = await User.find({
+      $or: [
+        { name: { $regex: escapeRegexText(q), $options: 'i' } },
+        { email: { $regex: escapeRegexText(q), $options: 'i' } },
+      ],
+    })
+      .select('_id')
+      .limit(50)
+      .lean()
+    if (reporterRows.length) {
+      or.push({ reporterId: { $in: reporterRows.map((r) => r._id) } })
+    }
+    filter.$or = or
+  }
+
+  return filter
+}
+
+export const getContentReports = async ({
+  page = 1,
+  limit = 20,
+  status,
+  targetType,
+  search,
+  dateFrom,
+  dateTo,
+}) => {
+  const filter = await buildContentReportFilter({ status, targetType, search, dateFrom, dateTo })
 
   const { skip, limit: perPage } = getPaginationQuery({ page, limit })
   const total = await ContentReport.countDocuments(filter)
@@ -802,7 +890,7 @@ export const updateContentReportStatus = async (
       })
     }
 
-    if (reportedUser?.email) {
+    if (status === 'reviewed' && reportedUser?.email) {
       const reportedDoc = await User.findById(reportedUser.id).select('name email preferences.language').lean()
       const lang = resolveAccountEmailLang(reportedDoc || reportedUser, notifyLang)
       const body =

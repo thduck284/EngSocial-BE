@@ -10,6 +10,33 @@ import { bumpPeriodicQuestsOnLessonEvent } from './userPeriodicQuest.service.js'
 import { incrementChallengeProgressByRequirement } from './challenge.service.js'
 
 /**
+ * Tổng lượt làm (sum attempts) theo lessonId từ UserLessonProgress
+ */
+export async function attachAttemptCountsToLessons(lessonsLean) {
+  if (!lessonsLean?.length) return lessonsLean || []
+  const ids = lessonsLean.map((l) => l._id).filter(Boolean)
+  const agg = await UserLessonProgress.aggregate([
+    {
+      $match: {
+        lessonId: { $in: ids },
+        isMockTest: { $ne: true },
+      },
+    },
+    {
+      $group: {
+        _id: '$lessonId',
+        attemptCount: { $sum: { $ifNull: ['$attempts', 0] } },
+      },
+    },
+  ])
+  const map = new Map(agg.map((r) => [String(r._id), r.attemptCount]))
+  return lessonsLean.map((l) => ({
+    ...l,
+    attemptCount: map.get(String(l._id)) ?? 0,
+  }))
+}
+
+/**
  * Get all lessons with filters and pagination
  */
 export const getLessons = async ({ skill, level, status = 'published', search, featured, page = 1, limit = 10 }) => {
@@ -329,6 +356,7 @@ export const submitWriting = async (userId, lessonId, { content, wordCount, time
     return {
       success: true,
       status: 'under_review',
+      attempts: progress.attempts,
       message: 'Submission successful, waiting for review'
     }
   }
@@ -783,12 +811,64 @@ function formatLessonProgressPayload(progress, attemptNo) {
   }
 
   const attempts = Array.isArray(progress.attemptHistory) ? progress.attemptHistory : []
+  const hasExplicitAttempt = attemptNo != null && attemptNo !== ''
   let attempt = null
-  if (attemptNo != null && attemptNo !== '') {
-    attempt = attempts.find((a) => a.attemptNo === Number(attemptNo))
+
+  if (hasExplicitAttempt) {
+    attempt = attempts.find((a) => a.attemptNo === Number(attemptNo)) || null
+  } else {
+    const writingAttempts = attempts.filter((a) => a.type === 'writing')
+    if (writingAttempts.length > 0) {
+      attempt = writingAttempts[writingAttempts.length - 1]
+    } else if (attempts.length > 0) {
+      attempt = attempts[attempts.length - 1]
+    }
   }
-  if (!attempt && attempts.length > 0) {
-    attempt = attempts[attempts.length - 1]
+
+  // Writing / lượt cụ thể: chỉ dùng dữ liệu trong attemptHistory, không trộn progress gốc
+  const attemptScoped = Boolean(attempt && (hasExplicitAttempt || attempt.type === 'writing'))
+
+  if (hasExplicitAttempt && !attempt) {
+    return {
+      notes: progress.notes || [],
+      status: 'not_started',
+      progress: 0,
+      score: null,
+      maxScore: progress.maxScore,
+      answers: [],
+      xpEarned: 0,
+      attempts: progress.attempts || 0,
+      submission: null,
+      aiScore: null,
+      aiFeedback: null,
+      attemptHistory: attempts,
+      viewAttemptNo: Number(attemptNo),
+    }
+  }
+
+  if (attemptScoped && attempt) {
+    const status =
+      attempt.score != null && attempt.score !== undefined
+        ? 'completed'
+        : attempt.type === 'writing'
+          ? 'under_review'
+          : progress.status
+    const sub = attempt.submission ?? null
+    return {
+      notes: progress.notes || [],
+      status,
+      progress: attempt.progress ?? 0,
+      score: attempt.score ?? null,
+      maxScore: attempt.maxScore ?? progress.maxScore,
+      answers: attempt.answers || [],
+      xpEarned: attempt.xpEarned ?? 0,
+      attempts: progress.attempts || 0,
+      submission: sub,
+      aiScore: sub?.aiScore ?? null,
+      aiFeedback: sub?.aiFeedback ?? null,
+      attemptHistory: attempts,
+      viewAttemptNo: attempt.attemptNo ?? null,
+    }
   }
 
   let status = progress.status
@@ -810,18 +890,18 @@ function formatLessonProgressPayload(progress, attemptNo) {
     answers: attempt?.answers || [],
     xpEarned: attempt?.xpEarned ?? progress.xpEarned,
     attempts: progress.attempts || 0,
-    submission: attempt?.submission || progress.submission,
-    aiScore: progress.submission?.aiScore,
-    aiFeedback: progress.submission?.aiFeedback,
+    submission: attempt?.submission || progress.submission || null,
+    aiScore: (attempt?.submission || progress.submission)?.aiScore ?? null,
+    aiFeedback: (attempt?.submission || progress.submission)?.aiFeedback ?? null,
     attemptHistory: attempts,
     viewAttemptNo: attempt?.attemptNo ?? null,
   }
 }
 
 /**
- * Mod/admin: get a specific user's lesson progress (optional attemptNo)
+ * Tiến độ bài học của user (tự xem hoặc mod xem học viên)
  */
-export const getLessonProgressForUser = async (lessonId, targetUserId, { attemptNo } = {}) => {
+export async function getLessonProgressByUser(lessonId, userId, { attemptNo } = {}) {
   let lesson = null
   if (String(lessonId).match(/^[a-f\d]{24}$/i)) {
     lesson = await Lesson.findById(lessonId).select('_id').lean()
@@ -832,11 +912,18 @@ export const getLessonProgressForUser = async (lessonId, targetUserId, { attempt
   if (!lesson) throw new Error('LESSON_NOT_FOUND')
 
   const progress = await UserLessonProgress.findOne({
-    userId: targetUserId,
+    userId,
     lessonId: lesson._id,
   }).lean()
 
   return formatLessonProgressPayload(progress, attemptNo)
+}
+
+/**
+ * Mod/admin: get a specific user's lesson progress (optional attemptNo)
+ */
+export const getLessonProgressForUser = async (lessonId, targetUserId, { attemptNo } = {}) => {
+  return getLessonProgressByUser(lessonId, targetUserId, { attemptNo })
 }
 
 /**

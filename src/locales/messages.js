@@ -7,6 +7,7 @@ const messages = {
     auth: {
       tokenNotFound: 'Không tìm thấy token xác thực',
       tokenInvalidOrExpired: 'Token không hợp lệ hoặc đã hết hạn',
+      sessionReplaced: 'Tài khoản của bạn vừa được đăng nhập ở thiết bị hoặc trình duyệt khác. Phiên hiện tại đã được đăng xuất.',
       registerSuccess: 'Đăng ký thành công',
       emailExists: 'Email đã được sử dụng',
       loginSuccess: 'Đăng nhập thành công',
@@ -70,6 +71,8 @@ const messages = {
       statusLabelInactive: 'Tạm ngưng',
       statusLabelBanned: 'Đã khóa',
       statusLabelPending: 'Chờ xử lý',
+      statusChangedDuration: 'Trạng thái này có hiệu lực đến {{expiresAt}} (GMT+7). Sau thời điểm đó, tài khoản sẽ tự động được kích hoạt lại nếu không có thay đổi khác.',
+      statusChangedPermanent: 'Trạng thái này không có thời hạn cố định — chỉ quản trị viên mới có thể kích hoạt lại tài khoản.',
     },
     emailReport: {
       resolutionSubject: 'EngSocial — Cập nhật xử lý báo cáo nội dung',
@@ -295,6 +298,7 @@ const messages = {
     auth: {
       tokenNotFound: 'Authentication token not found',
       tokenInvalidOrExpired: 'Token is invalid or expired',
+      sessionReplaced: 'Your account was signed in on another device or browser. This session has been signed out.',
       registerSuccess: 'Registration successful',
       emailExists: 'Email is already in use',
       loginSuccess: 'Login successful',
@@ -358,6 +362,8 @@ const messages = {
       statusLabelInactive: 'Inactive',
       statusLabelBanned: 'Locked',
       statusLabelPending: 'Pending',
+      statusChangedDuration: 'This status is in effect until {{expiresAt}} (GMT+7). After that time, your account will be reactivated automatically unless further action is taken.',
+      statusChangedPermanent: 'This status has no fixed end date — only an administrator can reactivate your account.',
     },
     emailReport: {
       resolutionSubject: 'EngSocial — Content report update',

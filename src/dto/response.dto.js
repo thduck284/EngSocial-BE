@@ -56,13 +56,15 @@ export class ApiResponse {
   /**
    * Error response (data optional, e.g. existingConversationId khi nhóm trùng thành viên)
    */
-  static error({ message = 'Có lỗi xảy ra', errors = null, data = null }) {
-    return new ApiResponse({
+  static error({ message = 'Có lỗi xảy ra', errors = null, data = null, messageKey = null }) {
+    const res = new ApiResponse({
       success: false,
       message,
       errors,
       data,
     })
+    if (messageKey) res.messageKey = messageKey
+    return res
   }
 
   /**
@@ -98,7 +100,7 @@ export const sendError = (res, options = {}, req = null) => {
   const { statusCode = 500, messageKey, messageParams, message, errors, data } = options
   const resolvedMessage = resolveErrorMessage(req, { messageKey, messageParams, message })
   return res.status(statusCode).json(
-    ApiResponse.error({ message: resolvedMessage, errors, data })
+    ApiResponse.error({ message: resolvedMessage, errors, data, messageKey })
   )
 }
 

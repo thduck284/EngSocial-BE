@@ -1,5 +1,6 @@
 import mongoose from 'mongoose'
-import { verifyToken } from '../utils/jwt.js'
+import { verifyToken, isSessionTokenValid } from '../utils/jwt.js'
+import { reactivateUserIfExpired } from '../utils/userStatus.util.js'
 import { Conversation, User } from '../models/index.js'
 import { registerWordScrambleLobbyHandlers, rooms as wordScrambleRooms } from '../sockets/wordScrambleLobby.js'
 import { registerWordScrambleGameHandlers } from '../sockets/wordScrambleGame.js'
@@ -59,8 +60,10 @@ export function setupSocket(io) {
     try {
       const decoded = verifyToken(token)
       const userId = decoded.userId?.toString?.() || decoded.userId
-      const u = await User.findById(userId).select('status').lean()
+      const u = await User.findById(userId).select('status statusUntil sessionVersion')
       if (!u) return next(new Error('auth_invalid'))
+      await reactivateUserIfExpired(u)
+      if (!isSessionTokenValid(decoded, u.sessionVersion)) return next(new Error('session_replaced'))
       if (u.status === 'banned') return next(new Error('account_banned'))
       if (u.status === 'inactive') return next(new Error('account_inactive'))
       socket.userId = userId
@@ -99,6 +102,7 @@ export function setupSocket(io) {
     registerSnakeGameGameHandlers(io, socket)
     if (socket.userId) {
       registerUserSocket(socket.userId, socket.id)
+      socket.join(`user:${socket.userId}`)
       socketConnectedAt.set(socket.id, Date.now())
 
       getConversationPartnerIds(socket.userId).then((partnerIds) => {

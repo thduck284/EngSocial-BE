@@ -24,6 +24,7 @@ export class UserDTO extends BaseDTO {
       preferences: user.preferences,
       role: user.role,
       status: user.status,
+      statusUntil: user.statusUntil ?? null,
       provider: user.provider,
       emailVerified: user.emailVerified,
       profilePrivacy: user.profilePrivacy || {
