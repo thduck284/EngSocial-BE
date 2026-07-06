@@ -1,4 +1,4 @@
-import { verifyToken } from '../utils/index.js'
+import { verifyToken, loadUserAndReactivateIfExpired, isSessionTokenValid } from '../utils/index.js'
 import { sendError } from '../dto/index.js'
 import { User } from '../models/index.js'
 
@@ -18,7 +18,7 @@ export const auth = async (req, res, next) => {
     const decoded = verifyToken(token)
     req.userId = decoded.userId
 
-    const u = await User.findById(req.userId).select('status').lean()
+    const u = await loadUserAndReactivateIfExpired(req.userId)
     if (!u) {
       return sendError(res, {
         statusCode: 401,
@@ -35,6 +35,12 @@ export const auth = async (req, res, next) => {
       return sendError(res, {
         statusCode: 403,
         messageKey: 'auth.accountInactive',
+      }, req)
+    }
+    if (!isSessionTokenValid(decoded, u.sessionVersion)) {
+      return sendError(res, {
+        statusCode: 401,
+        messageKey: 'auth.sessionReplaced',
       }, req)
     }
 

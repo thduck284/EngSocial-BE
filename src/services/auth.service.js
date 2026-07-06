@@ -1,12 +1,13 @@
 import crypto from 'crypto'
 import { User, RefreshToken, PasswordResetToken } from '../models/auth/index.js'
-import { hashPassword, comparePassword, generateTokenPair } from '../utils/index.js'
+import { hashPassword, comparePassword, generateTokenPair, reactivateUserIfExpired, loadUserAndReactivateIfExpired } from '../utils/index.js'
 import { UserDTO, AuthResponseDTO, RefreshTokenResponseDTO } from '../dto/index.js'
 import { indexUser } from '../config/elasticsearch/userSearch.service.js'
 import { OAuth2Client } from 'google-auth-library'
 import { bumpPeriodicQuestsOnLoginStreakEvent } from './userPeriodicQuest.service.js'
 import { incrementChallengeProgressByRequirement } from './challenge.service.js'
 import { updateUserStreakOnLogin } from '../utils/loginStreak.js'
+import { emitToUser } from '../config/socket.js'
 
 /**
  * Register new user
@@ -37,18 +38,8 @@ export const register = async ({ email, password, name, gender, dateOfBirth }) =
     await indexUser({ id: user._id.toString(), name: user.name, email: user.email, updatedAt: user.updatedAt })
   } catch (_) {}
 
-  // Generate tokens
-  const { accessToken, refreshToken } = generateTokenPair(user._id.toString())
-
-  // Save refresh token to database
-  const expiresAt = new Date()
-  expiresAt.setDate(expiresAt.getDate() + 7) // 7 days
-
-  await RefreshToken.create({
-    userId: user._id,
-    token: refreshToken,
-    expiresAt,
-  })
+  // Generate tokens (phiên đầu sau đăng ký — không kick ai)
+  const { accessToken, refreshToken } = await beginUserSession(user._id, { notifyReplace: false })
 
   // Return user data (without password) using DTO
   return new AuthResponseDTO({
@@ -68,9 +59,30 @@ const issueRefreshToken = async (userId, refreshToken) => {
   })
 }
 
-const buildAuthResponse = async (user) => {
-  const { accessToken, refreshToken } = generateTokenPair(user._id.toString())
+/** Một phiên đăng nhập — xóa refresh cũ, tăng sessionVersion, phát event kick phiên cũ */
+const beginUserSession = async (userId, opts = {}) => {
+  const { io, notifyReplace = true } = opts
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { $inc: { sessionVersion: 1 } },
+    { new: true },
+  )
+  if (!user) throw new Error('USER_NOT_FOUND')
+
+  await RefreshToken.deleteMany({ userId: user._id })
+  const sv = user.sessionVersion ?? 1
+  const { accessToken, refreshToken } = generateTokenPair(user._id.toString(), sv)
   await issueRefreshToken(user._id, refreshToken)
+
+  if (notifyReplace && io) {
+    emitToUser(io, user._id.toString(), 'auth:sessionReplaced', { sessionVersion: sv })
+  }
+
+  return { accessToken, refreshToken, sessionVersion: sv }
+}
+
+const buildAuthResponse = async (user, opts = {}) => {
+  const { accessToken, refreshToken } = await beginUserSession(user._id, opts)
   return new AuthResponseDTO({
     user,
     accessToken,
@@ -81,11 +93,13 @@ const buildAuthResponse = async (user) => {
 /**
  * Login user
  */
-export const login = async ({ email, password }) => {
+export const login = async ({ email, password, io }) => {
   const user = await User.findOne({ email }).select('+password')
   if (!user) {
     throw new Error('INVALID_CREDENTIALS')
   }
+
+  await reactivateUserIfExpired(user)
 
   if (user.status === 'banned') {
     throw new Error('ACCOUNT_BANNED')
@@ -100,9 +114,7 @@ export const login = async ({ email, password }) => {
     throw new Error('INVALID_CREDENTIALS')
   }
 
-  // Generate tokens
-  const { accessToken, refreshToken } = generateTokenPair(user._id.toString())
-  await issueRefreshToken(user._id, refreshToken)
+  const { accessToken, refreshToken } = await beginUserSession(user._id, { io })
 
   const now = new Date()
   const { calendarAdvance } = updateUserStreakOnLogin(user, now)
@@ -132,7 +144,7 @@ export const login = async ({ email, password }) => {
 /**
  * Social login with Google (ID token)
  */
-export const loginWithGoogle = async ({ idToken }) => {
+export const loginWithGoogle = async ({ idToken, io }) => {
   try {
     const clientId = process.env.GOOGLE_CLIENT_ID
     const client = new OAuth2Client(clientId)
@@ -152,6 +164,8 @@ export const loginWithGoogle = async ({ idToken }) => {
     let user = await User.findOne({
       $or: [{ provider: 'google', providerId }, { email }],
     })
+
+    if (user) await reactivateUserIfExpired(user)
 
     if (user?.status === 'banned') throw new Error('ACCOUNT_BANNED')
     if (user?.status === 'inactive') throw new Error('ACCOUNT_INACTIVE')
@@ -210,7 +224,7 @@ export const loginWithGoogle = async ({ idToken }) => {
         console.warn('[challenge] google login streak bump:', e?.message)
       }
     }
-    return buildAuthResponse(user)
+    return buildAuthResponse(user, { io })
   } catch (e) {
     if (e?.message === 'EMAIL_REQUIRED' || e?.message === 'ACCOUNT_BANNED' || e?.message === 'ACCOUNT_INACTIVE') throw e
     throw new Error('SOCIAL_TOKEN_INVALID')
@@ -220,7 +234,7 @@ export const loginWithGoogle = async ({ idToken }) => {
 /**
  * Social login with Facebook (access token)
  */
-export const loginWithFacebook = async ({ accessToken }) => {
+export const loginWithFacebook = async ({ accessToken, io }) => {
   const appId = process.env.FACEBOOK_APP_ID
   const appSecret = process.env.FACEBOOK_APP_SECRET
 
@@ -257,6 +271,8 @@ export const loginWithFacebook = async ({ accessToken }) => {
     let user = await User.findOne({
       $or: [{ provider: 'facebook', providerId }, { email }],
     })
+
+    if (user) await reactivateUserIfExpired(user)
 
     if (user?.status === 'banned') throw new Error('ACCOUNT_BANNED')
     if (user?.status === 'inactive') throw new Error('ACCOUNT_INACTIVE')
@@ -312,7 +328,7 @@ export const loginWithFacebook = async ({ accessToken }) => {
         console.warn('[challenge] facebook login streak bump:', e?.message)
       }
     }
-    return buildAuthResponse(user)
+    return buildAuthResponse(user, { io })
   } catch (e) {
     if (e?.message === 'EMAIL_REQUIRED' || e?.message === 'ACCOUNT_BANNED' || e?.message === 'ACCOUNT_INACTIVE') throw e
     throw new Error('SOCIAL_TOKEN_INVALID')
@@ -336,7 +352,7 @@ export const refreshAccessToken = async (refreshToken) => {
     throw new Error('REFRESH_TOKEN_EXPIRED')
   }
 
-  const user = await User.findById(tokenDoc.userId).select('status').lean()
+  const user = await loadUserAndReactivateIfExpired(tokenDoc.userId)
   if (!user) {
     await RefreshToken.deleteOne({ _id: tokenDoc._id })
     throw new Error('INVALID_REFRESH_TOKEN')
@@ -350,8 +366,8 @@ export const refreshAccessToken = async (refreshToken) => {
     throw new Error('ACCOUNT_INACTIVE')
   }
 
-  // Generate new access token
-  const { accessToken } = generateTokenPair(tokenDoc.userId.toString())
+  // Generate new access token (cùng sessionVersion hiện tại)
+  const { accessToken } = generateTokenPair(tokenDoc.userId.toString(), user.sessionVersion ?? 0)
 
   return new RefreshTokenResponseDTO({ accessToken })
 }

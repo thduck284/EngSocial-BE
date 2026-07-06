@@ -36,7 +36,7 @@ export const login = async (req, res, next) => {
   try {
     const { email, password } = req.body
 
-    const data = await authService.login({ email, password })
+    const data = await authService.login({ email, password, io: req.app.get('io') })
 
     // Fire-and-forget achievement check (streak-based)
     const userId = data?.user?.id || data?.user?._id
@@ -81,7 +81,7 @@ export const login = async (req, res, next) => {
 export const loginWithGoogle = async (req, res, next) => {
   try {
     const { idToken } = req.body
-    const data = await authService.loginWithGoogle({ idToken })
+    const data = await authService.loginWithGoogle({ idToken, io: req.app.get('io') })
     // Fire-and-forget achievement check
     const userId = data?.user?.id || data?.user?._id
     if (userId) {
@@ -122,7 +122,7 @@ export const loginWithGoogle = async (req, res, next) => {
 export const loginWithFacebook = async (req, res, next) => {
   try {
     const { accessToken } = req.body
-    const data = await authService.loginWithFacebook({ accessToken })
+    const data = await authService.loginWithFacebook({ accessToken, io: req.app.get('io') })
     // Fire-and-forget achievement check
     const userId = data?.user?.id || data?.user?._id
     if (userId) {

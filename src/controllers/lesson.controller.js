@@ -42,7 +42,8 @@ export const getLessons = async (req, res, next) => {
       })
       const total = sorted.length
       const lessonsRes = sorted.slice(skip, skip + limitNum)
-      data = lessonsRes.map((l) => new LessonDTO(l).toJSON())
+      const enriched = await lessonService.attachAttemptCountsToLessons(lessonsRes)
+      data = enriched.map((l) => new LessonDTO(l).toJSON())
       const totalPages = Math.ceil(total / limitNum)
       return sendPaginated(res, {
         data,
@@ -61,7 +62,8 @@ export const getLessons = async (req, res, next) => {
         .lean(),
     ])
 
-    data = lessonsRes.map((l) => new LessonDTO(l).toJSON())
+    const enriched = await lessonService.attachAttemptCountsToLessons(lessonsRes)
+    data = enriched.map((l) => new LessonDTO(l).toJSON())
     const totalPages = Math.ceil(total / limitNum)
     return sendPaginated(res, {
       data,
@@ -474,31 +476,13 @@ export const getWritingContent = async (req, res, next) => {
 export const getLessonProgress = async (req, res, next) => {
   try {
     const { id } = req.params
-    const filter = mongoose.isValidObjectId(id) ? { _id: id } : { slug: id }
-    const lesson = await Lesson.findOne(filter).select('_id').lean()
-    if (!lesson) {
-      return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
-    }
-    const progress = await UserLessonProgress.findOne({
-      userId: req.userId,
-      lessonId: lesson._id,
-    }).lean()
-    const data = {
-      notes: progress?.notes || [],
-      status: progress?.status,
-      progress: progress?.progress,
-      score: progress?.score,
-      maxScore: progress?.maxScore,
-      answers: progress?.attemptHistory?.[(progress?.attemptHistory?.length || 1) - 1]?.answers || [],
-      xpEarned: progress?.xpEarned,
-      attempts: progress?.attempts || 0,
-      submission: progress?.submission,
-      aiScore: progress?.aiScore,
-      aiFeedback: progress?.aiFeedback,
-      attemptHistory: progress?.attemptHistory || [],
-    }
+    const { attemptNo } = req.query
+    const data = await lessonService.getLessonProgressByUser(id, req.userId, { attemptNo })
     return sendSuccess(res, { data }, req)
   } catch (error) {
+    if (error.message === 'LESSON_NOT_FOUND') {
+      return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
+    }
     next(error)
   }
 }

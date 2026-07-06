@@ -7,6 +7,7 @@ import {
   updateContentReportStatusSchema,
   adminUpdateUserSchema,
   adminSetPasswordSchema,
+  updateUserStatusSchema,
 } from '../../validators/admin.validator.js'
 
 const router = Router()
@@ -24,7 +25,7 @@ router.post(
 )
 router.delete('/users/:id', auth, requireAdmin, adminController.deleteUserByAdmin)
 router.patch('/users/:id/role', auth, requireAdmin, adminController.updateUserRole)
-router.patch('/users/:id/status', auth, requireAdmin, adminController.updateUserStatus)
+router.patch('/users/:id/status', auth, requireAdmin, validate(updateUserStatusSchema), adminController.updateUserStatus)
 
 // Content reports (admin only) — bảng ContentReport
 router.get('/reports', auth, requireAdmin, adminController.getContentReports)

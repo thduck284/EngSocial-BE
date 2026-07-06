@@ -1,13 +1,15 @@
 import nodemailer from 'nodemailer'
 import { getMessage } from '../locales/messages.js'
+import { formatStatusUntilForEmail, isRestrictedStatus } from '../utils/userStatus.util.js'
 
-const SMTP_HOST = process.env.SMTP_HOST
+const SMTP_HOST = (process.env.SMTP_HOST || '').trim()
 const SMTP_PORT = parseInt(process.env.SMTP_PORT || '587', 10)
-const SMTP_FROM = process.env.SMTP_FROM
+const SMTP_FROM = (process.env.SMTP_FROM || '').trim()
+const SMTP_USER = (process.env.SMTP_USER || SMTP_FROM || '').trim()
 const SMTP_PASS = (process.env.SMTP_PASS || '').replace(/\s+/g, '')
 const SMTP_TLS_INSECURE = process.env.SMTP_TLS_INSECURE === '1'
 
-const hasSmtpConfig = SMTP_HOST && SMTP_FROM && SMTP_PASS
+const hasSmtpConfig = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS && SMTP_FROM)
 
 let transporter = null
 if (hasSmtpConfig) {
@@ -16,19 +18,44 @@ if (hasSmtpConfig) {
     port: SMTP_PORT,
     secure: SMTP_PORT === 465,
     auth: {
-      user: SMTP_FROM,
+      user: SMTP_USER,
       pass: SMTP_PASS,
     },
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 20_000,
     ...(SMTP_TLS_INSECURE ? { tls: { rejectUnauthorized: false } } : {}),
   })
+  // eslint-disable-next-line no-console
+  console.log(`[email] SMTP ready (${SMTP_HOST}:${SMTP_PORT})`)
+} else {
+  // eslint-disable-next-line no-console
+  console.warn('[email] SMTP chưa cấu hình — email sẽ chỉ log ra console (dev)')
+}
+
+async function deliverEmail({ to, subject, text, html, throwOnError = false, logContext = 'email' }) {
+  if (!transporter) return false
+
+  try {
+    await transporter.sendMail({
+      from: `"EngSocial" <${SMTP_FROM}>`,
+      to,
+      subject,
+      text,
+      html,
+    })
+    return true
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[email] Gửi thất bại (${logContext}):`, err.message)
+    if (throwOnError) throw err
+    return false
+  }
 }
 
 /**
  * Gửi email chứa link đặt lại mật khẩu.
  * Nếu chưa cấu hình SMTP thì chỉ log link ra console (dùng cho dev).
- * @param {string} toEmail - Email người nhận
- * @param {string} resetLink - URL đầy đủ đến trang reset (ví dụ https://.../reset-password?token=...)
- * @param {string} [lang='vi'] - Ngôn ngữ nội dung email (vi | en)
  */
 export async function sendPasswordResetEmail(toEmail, resetLink, lang = 'vi') {
   const subject = getMessage(lang, 'auth.emailResetSubject')
@@ -44,13 +71,11 @@ export async function sendPasswordResetEmail(toEmail, resetLink, lang = 'vi') {
   const linkLabel = getMessage(lang, 'auth.emailResetLinkLabel')
   const copyHint = getMessage(lang, 'auth.emailResetCopyHint')
 
-  try {
-    await transporter.sendMail({
-      from: `"EngSocial" <${SMTP_FROM}>`,
-      to: toEmail,
-      subject,
-      text: textBody,
-      html: `
+  await deliverEmail({
+    to: toEmail,
+    subject,
+    text: textBody,
+    html: `
 <!DOCTYPE html>
 <html>
 <head>
@@ -72,13 +97,10 @@ export async function sendPasswordResetEmail(toEmail, resetLink, lang = 'vi') {
   </table>
 </body>
 </html>
-      `.trim(),
-    })
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[email] Gửi email thất bại:', err.message)
-    throw err
-  }
+    `.trim(),
+    throwOnError: true,
+    logContext: 'password reset',
+  })
 }
 
 const STATUS_LABEL_KEYS = {
@@ -139,14 +161,20 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;')
 }
 
-/**
- * Thông báo user khi admin đổi trạng thái tài khoản. Không throw — chỉ log nếu lỗi SMTP.
- * @param {import('mongoose').Document} userDoc - User đã save (có email, name, preferences)
- * @param {{ prevStatus: string, newStatus: string, notifyLang?: string }} opts
- */
-export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus, notifyLang = 'vi' }) {
+/** Thông báo user khi admin đổi trạng thái tài khoản. Không throw — chỉ log nếu lỗi SMTP. */
+export async function sendUserStatusChangeEmail(userDoc, {
+  prevStatus,
+  newStatus,
+  notifyLang = 'vi',
+  statusUntil = null,
+  prevStatusUntil = null,
+}) {
   const toEmail = userDoc?.email
-  if (!toEmail || prevStatus === newStatus) return
+  const effectiveUntil = statusUntil ?? userDoc?.statusUntil ?? null
+  const prevUntilMs = prevStatusUntil ? new Date(prevStatusUntil).getTime() : null
+  const nextUntilMs = effectiveUntil ? new Date(effectiveUntil).getTime() : null
+  if (!toEmail) return
+  if (prevStatus === newStatus && prevUntilMs === nextUntilMs) return
 
   const lang = resolveAccountEmailLang(userDoc, notifyLang)
   const prevLabel = getMessage(lang, STATUS_LABEL_KEYS[prevStatus] || STATUS_LABEL_KEYS.pending)
@@ -157,6 +185,16 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
   const greeting = getMessage(lang, 'emailAccount.statusChangedGreeting', { name })
   const p1 = getMessage(lang, 'emailAccount.statusChangedP1', { prevLabel, newLabel })
   const p2 = getAccountStatusChangeDetail(lang, newStatus)
+  let pDuration = ''
+  if (isRestrictedStatus(newStatus)) {
+    if (effectiveUntil) {
+      pDuration = getMessage(lang, 'emailAccount.statusChangedDuration', {
+        expiresAt: formatStatusUntilForEmail(effectiveUntil, lang),
+      })
+    } else {
+      pDuration = getMessage(lang, 'emailAccount.statusChangedPermanent')
+    }
+  }
   const p3 = getAccountStatusChangeFooterNote(lang, newStatus)
   const contact = getAccountStatusChangeContact(lang)
   const footer = getMessage(lang, 'emailAccount.statusChangedFooter')
@@ -169,7 +207,7 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
     contact.hours,
     contact.website,
   ].join('\n')
-  const textBody = [greeting, p1, p2, p3, contactBlock, footer].join('\n\n')
+  const textBody = [greeting, p1, p2, pDuration, p3, contactBlock, footer].filter(Boolean).join('\n\n')
 
   if (!transporter) {
     // eslint-disable-next-line no-console
@@ -181,6 +219,7 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
   const safeGreeting = escapeHtml(greeting)
   const safeP1 = escapeHtml(p1)
   const safeP2 = escapeHtml(p2)
+  const safePDuration = pDuration ? escapeHtml(pDuration) : ''
   const safeP3 = escapeHtml(p3)
   const safePrev = escapeHtml(prevLabel)
   const safeNew = escapeHtml(newLabel)
@@ -193,13 +232,11 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
   const safeContactHours = escapeHtml(contact.hours)
   const safeContactWebsite = escapeHtml(contact.website)
 
-  try {
-    await transporter.sendMail({
-      from: `"EngSocial" <${SMTP_FROM}>`,
-      to: toEmail,
-      subject,
-      text: textBody,
-      html: `
+  await deliverEmail({
+    to: toEmail,
+    subject,
+    text: textBody,
+    html: `
 <!DOCTYPE html>
 <html lang="${lang}">
 <head>
@@ -237,6 +274,7 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
               </table>
               <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#334155;">${safeP1}</p>
               <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#475569;">${safeP2}</p>
+              ${safePDuration ? `<p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#475569;">${safePDuration}</p>` : ''}
               <p style="margin:0 0 28px;font-size:15px;line-height:1.65;color:#475569;">${safeP3}</p>
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background:#f8fafc;border-radius:14px;border:1px solid #e2e8f0;">
                 <tr>
@@ -275,20 +313,15 @@ export async function sendUserStatusChangeEmail(userDoc, { prevStatus, newStatus
   </table>
 </body>
 </html>
-      `.trim(),
-    })
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[email] Gửi thông báo đổi trạng thái tài khoản thất bại:', err.message)
-  }
+    `.trim(),
+    logContext: 'account status change',
+  })
 }
 
-/**
- * Gửi OTP xác minh đổi email hoặc xóa tài khoản.
- */
+/** Gửi OTP xác minh đổi email hoặc xóa tài khoản. */
 export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_change') {
   let subject, intro
-  
+
   if (type === 'delete_account') {
     subject = lang === 'en' ? 'EngSocial — Confirm Account Deletion' : 'EngSocial — Xác nhận xóa tài khoản'
     intro = lang === 'en'
@@ -305,7 +338,7 @@ export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_chan
       ? `Your OTP code to change your email address is:`
       : `Mã OTP để xác nhận đổi email của bạn là:`
   }
-  
+
   const expiry = lang === 'en' ? 'This code expires in 10 minutes.' : 'Mã có hiệu lực trong 10 phút.'
 
   if (!transporter) {
@@ -314,9 +347,7 @@ export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_chan
     return
   }
 
-  try {
-    await transporter.sendMail({
-    from: `"EngSocial" <${SMTP_FROM}>`,
+  const sent = await deliverEmail({
     to: toEmail,
     subject,
     text: `${intro} ${otp}\n${expiry}`,
@@ -344,13 +375,89 @@ export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_chan
   </table>
 </body>
 </html>`.trim(),
-    })
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[email] Gửi OTP thất bại:', err.message)
+    logContext: 'OTP',
+  })
+
+  if (!sent) {
     // eslint-disable-next-line no-console
     console.log(`[email] OTP (fallback log) for ${toEmail}: ${otp}`)
-    throw err
+    throw new Error('EMAIL_SEND_FAILED')
   }
 }
 
+const DEFAULT_REPORT_HELP_URL = 'https://engsocial-fe.onrender.com/help'
+
+function reportHelpUrl() {
+  return (process.env.REPORT_HELP_URL || process.env.FRONTEND_HELP_URL || DEFAULT_REPORT_HELP_URL).trim()
+}
+
+/**
+ * Email thông báo kết quả xử lý báo cáo (admin → reporter / người bị báo cáo).
+ * @param {string} toEmail
+ * @param {{ name?: string, body: string, lang?: string }} opts
+ */
+export async function sendReportResolutionEmail(toEmail, { name, body, lang = 'vi' } = {}) {
+  if (!toEmail || !body?.trim()) return false
+
+  const helpLink = reportHelpUrl()
+  const subject = getMessage(lang, 'emailReport.resolutionSubject')
+  const tagline = getMessage(lang, 'emailReport.resolutionTagline')
+  const greeting = getMessage(lang, 'emailReport.resolutionGreeting', { name: name || toEmail })
+  const helpTitle = getMessage(lang, 'emailReport.resolutionHelpTitle')
+  const helpBody = getMessage(lang, 'emailReport.resolutionHelpBody')
+  const helpLinkLabel = getMessage(lang, 'emailReport.resolutionHelpLinkLabel')
+  const footer = getMessage(lang, 'emailReport.resolutionFooter')
+  const textBody = [greeting, body.trim(), '', helpTitle, helpBody, helpLink, footer].join('\n')
+
+  if (!transporter) {
+    // eslint-disable-next-line no-console
+    console.log('[email] SMTP chưa cấu hình. Report resolution (log only):', { toEmail, body: body.trim() })
+    return false
+  }
+
+  const safeTagline = escapeHtml(tagline)
+  const safeGreeting = escapeHtml(greeting)
+  const safeBody = escapeHtml(body.trim()).replace(/\n/g, '<br>')
+  const safeHelpTitle = escapeHtml(helpTitle)
+  const safeHelpBody = escapeHtml(helpBody)
+  const safeHelpLink = escapeHtml(helpLink)
+  const safeHelpLinkLabel = escapeHtml(helpLinkLabel)
+  const safeFooter = escapeHtml(footer)
+
+  return deliverEmail({
+    to: toEmail,
+    subject,
+    text: textBody,
+    html: `
+<!DOCTYPE html>
+<html lang="${lang}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:36px 16px 48px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 12px 40px rgba(79,70,229,0.12);border:1px solid #e2e8f0;">
+        <tr><td style="background:linear-gradient(135deg,#4f46e5 0%,#6366f1 45%,#7c3aed 100%);padding:28px 32px;">
+          <div style="font-size:22px;font-weight:800;color:#fff;">EngSocial</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.88);margin-top:8px;">${safeTagline}</div>
+        </td></tr>
+        <tr><td style="padding:28px 32px;">
+          <p style="margin:0 0 16px;font-size:17px;font-weight:600;color:#0f172a;">${safeGreeting}</p>
+          <p style="margin:0 0 24px;font-size:15px;line-height:1.65;color:#334155;">${safeBody}</p>
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background:#f8fafc;border-radius:14px;border:1px solid #e2e8f0;">
+            <tr><td style="padding:18px 20px;">
+              <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#334155;">${safeHelpTitle}</p>
+              <p style="margin:0 0 12px;font-size:14px;line-height:1.55;color:#475569;">${safeHelpBody}</p>
+              <a href="${safeHelpLink}" style="display:inline-block;padding:12px 20px;background:#4f46e5;color:#fff !important;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px;">${safeHelpLinkLabel}</a>
+              <p style="margin:12px 0 0;font-size:12px;color:#64748b;word-break:break-all;"><a href="${safeHelpLink}" style="color:#4f46e5;">${safeHelpLink}</a></p>
+            </td></tr>
+          </table>
+          <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">${safeFooter}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`.trim(),
+    logContext: 'report resolution',
+  })
+}

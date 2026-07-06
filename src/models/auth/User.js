@@ -126,6 +126,17 @@ const userSchema = new mongoose.Schema({
     enum: ['active', 'inactive', 'banned', 'pending'],
     default: 'pending',
   },
+  /** Hết hạn khóa/tạm ngưng — null = vĩnh viễn hoặc không áp dụng */
+  statusUntil: {
+    type: Date,
+    default: null,
+  },
+  /** Tăng mỗi lần đăng nhập mới — chỉ một phiên active (JWT phải khớp sv) */
+  sessionVersion: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
   provider: {
     type: String,
     enum: ['local', 'google', 'facebook'],

@@ -55,6 +55,9 @@ export const updateUserStatus = async (req, res, next) => {
     if (error.message === 'INVALID_STATUS') {
       return sendError(res, { statusCode: 400, messageKey: 'common.validationFailed' }, req)
     }
+    if (error.message === 'INVALID_DURATION') {
+      return sendError(res, { statusCode: 400, messageKey: 'common.validationFailed' }, req)
+    }
     next(error)
   }
 }
@@ -194,8 +197,16 @@ export const moderateComment = async (req, res, next) => {
 
 export const getContentReports = async (req, res, next) => {
   try {
-    const { page, limit, status, targetType } = req.query
-    const result = await adminService.getContentReports({ page, limit, status, targetType })
+    const { page, limit, status, targetType, search, dateFrom, dateTo } = req.query
+    const result = await adminService.getContentReports({
+      page,
+      limit,
+      status,
+      targetType,
+      search,
+      dateFrom,
+      dateTo,
+    })
     return sendPaginated(
       res,
       {
