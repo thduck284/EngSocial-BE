@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 import { User, RefreshToken, PasswordResetToken, EmailVerificationToken } from '../models/auth/index.js'
-import { hashPassword, comparePassword, generateTokenPair, reactivateUserIfExpired, loadUserAndReactivateIfExpired } from '../utils/index.js'
+import { hashPassword, comparePassword, generateTokenPair, reactivateUserIfExpired, loadUserAndReactivateIfExpired, buildFrontendUrl } from '../utils/index.js'
 import { UserDTO, AuthResponseDTO, RefreshTokenResponseDTO } from '../dto/index.js'
 import { indexUser } from '../config/elasticsearch/userSearch.service.js'
 import { OAuth2Client } from 'google-auth-library'
@@ -12,14 +12,6 @@ import { emitToUser } from '../config/socket.js'
 const EMAIL_VERIFY_TOKEN_TTL_MINUTES = 24 * 60
 const RESEND_VERIFY_COOLDOWN_MS = 60 * 1000
 const resendVerifyCooldowns = new Map()
-
-function buildFrontendUrl(path) {
-  const corsOrigins = process.env.CORS_ORIGIN
-    ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
-    : []
-  const baseUrl = (corsOrigins[0] || '').replace(/\/$/, '')
-  return `${baseUrl}${path}`
-}
 
 async function createAndSendVerificationEmail(user, lang = 'vi') {
   await EmailVerificationToken.deleteMany({ userId: user._id })
@@ -553,9 +545,7 @@ export const forgotPassword = async (email, lang = 'vi') => {
     expiresAt,
   })
 
-  const corsOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()).filter(Boolean) : []
-  const baseUrl = (corsOrigins[0] || '').replace(/\/$/, '')
-  const resetLink = `${baseUrl}/reset-password?token=${token}`
+  const resetLink = buildFrontendUrl(`/reset-password?token=${token}`)
 
   const { sendPasswordResetEmail } = await import('./email.service.js')
   try {

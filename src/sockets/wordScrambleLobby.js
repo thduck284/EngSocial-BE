@@ -29,12 +29,26 @@ function scheduleEmptyRoomDeletion(io, code) {
     emptyRoomDeletionTimers.delete(code)
     const room = rooms.get(code)
     if (!room) return
+    if (room.inGame) return
     if (room.slots.filter(Boolean).length === 0) {
       rooms.delete(code)
       console.log(`[Lobby] Room ${code} removed after ${EMPTY_ROOM_TTL_MS / 1000}s empty`)
     }
   }, EMPTY_ROOM_TTL_MS)
   emptyRoomDeletionTimers.set(code, timer)
+}
+
+/** Lưu snapshot người chơi trước khi client rời lobby (tránh mất slot khi disconnect). */
+function markRoomInGame(room) {
+  const occupied = room.slots.filter(Boolean)
+  room.inGame = true
+  room.playerSnapshot = occupied.map((s) => ({
+    userId: String(s.userId),
+    name: s.name,
+    avatar: s.avatar || '',
+    level: s.level,
+  }))
+  return room.playerSnapshot
 }
 
 const roomChannel = (code) => `room:${code}`
@@ -207,6 +221,7 @@ async function processMatchmaking(io, capacity) {
       }
       cancelEmptyRoomDeletion(code)
       rooms.set(code, room)
+      markRoomInGame(room)
 
       groupMembers.forEach(m => {
         const otherMembersIds = groupMembers
@@ -268,14 +283,18 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
     if (cur) {
       const room = rooms.get(cur)
       if (room) {
-        // Gán slot = null, KHÔNG dùng filter: filter bỏ cả ô null → mảng co lại → join báo 'full'.
-        const idx = room.slots.findIndex((s) => s && s.socketId === socket.id)
-        if (idx >= 0) room.slots[idx] = null
-        if (room.slots.filter(Boolean).length === 0) {
-          scheduleEmptyRoomDeletion(io, cur)
+        if (room.inGame) {
+          // Trận đã bắt đầu — giữ slots/snapshot cho game socket, chỉ rời kênh lobby
         } else {
-          cancelEmptyRoomDeletion(cur)
-          io.to(roomChannel(cur)).emit('wordScrambleLobby:state', sanitizeObject(room))
+          // Gán slot = null, KHÔNG dùng filter: filter bỏ cả ô null → mảng co lại → join báo 'full'.
+          const idx = room.slots.findIndex((s) => s && s.socketId === socket.id)
+          if (idx >= 0) room.slots[idx] = null
+          if (room.slots.filter(Boolean).length === 0) {
+            scheduleEmptyRoomDeletion(io, cur)
+          } else {
+            cancelEmptyRoomDeletion(cur)
+            io.to(roomChannel(cur)).emit('wordScrambleLobby:state', sanitizeObject(room))
+          }
         }
       }
       socket.leave(roomChannel(cur))
@@ -415,6 +434,7 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
       if (room.lastMatchRequest) delete room.lastMatchRequest
       broadcastRoomState(io, code, room)
       const participantsIds = occupied.map(s => String(s.userId))
+      markRoomInGame(room)
       const startedPayload = sanitizeObject({
         roomCode: code,
         aiResult: null,
@@ -542,6 +562,7 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
 
     // THÔNG BÁO CHO TẤT CẢ (BAO GỒM CẢ NHỮNG NGƯỜI MỚI ĐƯỢC PULL VÀO) — matching đã emit lúc bắt đầu poll
     const participantsIds = occupied.map(s => String(s.userId))
+    markRoomInGame(room)
     const startedPayload = sanitizeObject({
       roomCode: code,
       aiResult,
