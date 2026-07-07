@@ -318,6 +318,56 @@ export async function sendUserStatusChangeEmail(userDoc, {
   })
 }
 
+/**
+ * Gửi email xác minh tài khoản khi đăng ký.
+ * Nếu chưa cấu hình SMTP thì chỉ log link ra console (dùng cho dev).
+ */
+export async function sendSignupVerificationEmail(toEmail, verifyLink, lang = 'vi') {
+  const subject = getMessage(lang, 'auth.emailVerifySubject')
+  const textBody = getMessage(lang, 'auth.emailVerifyBody', { link: verifyLink })
+
+  if (!transporter) {
+    // eslint-disable-next-line no-console
+    console.log('[email] SMTP chưa cấu hình. Link xác minh email (log only):', verifyLink)
+    return
+  }
+
+  const intro = getMessage(lang, 'auth.emailVerifyBodyIntro')
+  const linkLabel = getMessage(lang, 'auth.emailVerifyLinkLabel')
+  const copyHint = getMessage(lang, 'auth.emailVerifyCopyHint')
+
+  await deliverEmail({
+    to: toEmail,
+    subject,
+    text: textBody,
+    html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0; padding:0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#f5f5f5;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 480px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+    <tr>
+      <td style="padding: 32px 24px;">
+        <p style="margin: 0 0 24px; color: #333; font-size: 16px; line-height: 1.6;">${intro}</p>
+        <p style="margin: 0 0 24px;">
+          <a href="${verifyLink}" style="display: inline-block; padding: 14px 28px; background: #6366f1; color: #fff !important; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px;">${linkLabel}</a>
+        </p>
+        <p style="margin: 0 0 8px; color: #666; font-size: 13px;">${copyHint}</p>
+        <p style="margin: 0; word-break: break-all; font-size: 12px; color: #888;"><a href="${verifyLink}" style="color: #6366f1;">${verifyLink}</a></p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+    `.trim(),
+    throwOnError: true,
+    logContext: 'email verification',
+  })
+}
+
 /** Gửi OTP xác minh đổi email hoặc xóa tài khoản. */
 export async function sendOtpEmail(toEmail, otp, lang = 'vi', type = 'email_change') {
   let subject, intro

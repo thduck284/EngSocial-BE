@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import { User, RefreshToken, PasswordResetToken } from '../models/auth/index.js'
+import { User, RefreshToken, PasswordResetToken, EmailVerificationToken } from '../models/auth/index.js'
 import { hashPassword, comparePassword, generateTokenPair, reactivateUserIfExpired, loadUserAndReactivateIfExpired } from '../utils/index.js'
 import { UserDTO, AuthResponseDTO, RefreshTokenResponseDTO } from '../dto/index.js'
 import { indexUser } from '../config/elasticsearch/userSearch.service.js'
@@ -9,10 +9,42 @@ import { incrementChallengeProgressByRequirement } from './challenge.service.js'
 import { updateUserStreakOnLogin } from '../utils/loginStreak.js'
 import { emitToUser } from '../config/socket.js'
 
+const EMAIL_VERIFY_TOKEN_TTL_MINUTES = 24 * 60
+const RESEND_VERIFY_COOLDOWN_MS = 60 * 1000
+const resendVerifyCooldowns = new Map()
+
+function buildFrontendUrl(path) {
+  const corsOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
+    : []
+  const baseUrl = (corsOrigins[0] || '').replace(/\/$/, '')
+  return `${baseUrl}${path}`
+}
+
+async function createAndSendVerificationEmail(user, lang = 'vi') {
+  await EmailVerificationToken.deleteMany({ userId: user._id })
+
+  const token = crypto.randomBytes(32).toString('hex')
+  const expiresAt = new Date()
+  expiresAt.setMinutes(expiresAt.getMinutes() + EMAIL_VERIFY_TOKEN_TTL_MINUTES)
+
+  await EmailVerificationToken.create({
+    userId: user._id,
+    token,
+    expiresAt,
+  })
+
+  const verifyLink = buildFrontendUrl(`/verify-email?token=${token}`)
+  const { sendSignupVerificationEmail } = await import('./email.service.js')
+  try {
+    await sendSignupVerificationEmail(user.email, verifyLink, lang)
+  } catch (_) {}
+}
+
 /**
  * Register new user
  */
-export const register = async ({ email, password, name, gender, dateOfBirth }) => {
+export const register = async ({ email, password, name, gender, dateOfBirth }, lang = 'vi') => {
   // Check if email already exists
   const existingUser = await User.findOne({ email })
   if (existingUser) {
@@ -38,15 +70,12 @@ export const register = async ({ email, password, name, gender, dateOfBirth }) =
     await indexUser({ id: user._id.toString(), name: user.name, email: user.email, updatedAt: user.updatedAt })
   } catch (_) {}
 
-  // Generate tokens (phiên đầu sau đăng ký — không kick ai)
-  const { accessToken, refreshToken } = await beginUserSession(user._id, { notifyReplace: false })
+  await createAndSendVerificationEmail(user, lang)
 
-  // Return user data (without password) using DTO
-  return new AuthResponseDTO({
-    user,
-    accessToken,
-    refreshToken,
-  })
+  return {
+    requiresEmailVerification: true,
+    email: user.email,
+  }
 }
 
 const issueRefreshToken = async (userId, refreshToken) => {
@@ -106,6 +135,10 @@ export const login = async ({ email, password, io }) => {
   }
   if (user.status === 'inactive') {
     throw new Error('ACCOUNT_INACTIVE')
+  }
+
+  if ((user.provider === 'local' || !user.provider) && !user.emailVerified) {
+    throw new Error('EMAIL_NOT_VERIFIED')
   }
 
   // Check password
@@ -234,6 +267,53 @@ export const loginWithGoogle = async ({ idToken, io }) => {
 /**
  * Social login with Facebook (access token)
  */
+const FACEBOOK_GRAPH_VERSION = process.env.FACEBOOK_GRAPH_VERSION || 'v19.0'
+
+function shouldRefreshAvatarFromFacebook(currentAvatar, picture) {
+  if (!picture) return false
+  if (!currentAvatar) return true
+  return /ui-avatars\.com|facebook\.com|fbcdn\.net|fbsbx\.com|graph\.facebook\.com/i.test(currentAvatar)
+}
+
+async function fetchFacebookUserProfile(accessToken) {
+  const base = `https://graph.facebook.com/${FACEBOOK_GRAPH_VERSION}`
+
+  const meUrl = new URL(`${base}/me`)
+  meUrl.searchParams.set('fields', 'id,name,email')
+  meUrl.searchParams.set('access_token', accessToken)
+  const meRes = await fetch(meUrl.toString())
+  const me = await meRes.json()
+  const providerId = me?.id ? String(me.id) : ''
+  if (!meRes.ok || !providerId) throw new Error('SOCIAL_TOKEN_INVALID')
+
+  let picture = null
+  try {
+    const picUrl = new URL(`${base}/${providerId}/picture`)
+    picUrl.searchParams.set('redirect', '0')
+    picUrl.searchParams.set('type', 'large')
+    picUrl.searchParams.set('access_token', accessToken)
+    const picRes = await fetch(picUrl.toString())
+    const pic = await picRes.json()
+    picture = pic?.data?.url || null
+  } catch (_) {}
+
+  if (!picture) {
+    const mePicUrl = new URL(`${base}/me`)
+    mePicUrl.searchParams.set('fields', 'picture.type(large)')
+    mePicUrl.searchParams.set('access_token', accessToken)
+    const mePicRes = await fetch(mePicUrl.toString())
+    const mePic = await mePicRes.json()
+    picture = mePic?.picture?.data?.url || null
+  }
+
+  return {
+    providerId,
+    email: me?.email ? String(me.email).trim().toLowerCase() : `fb_${providerId}@engsocial.local`,
+    name: me?.name || 'User',
+    picture,
+  }
+}
+
 export const loginWithFacebook = async ({ accessToken, io }) => {
   const appId = process.env.FACEBOOK_APP_ID
   const appSecret = process.env.FACEBOOK_APP_SECRET
@@ -256,17 +336,7 @@ export const loginWithFacebook = async ({ accessToken, io }) => {
     const v = await verifyViaDebug()
     if (!v.ok) throw new Error('SOCIAL_TOKEN_INVALID')
 
-    const meUrl = new URL('https://graph.facebook.com/me')
-    meUrl.searchParams.set('fields', 'id,name,email,picture.type(large)')
-    meUrl.searchParams.set('access_token', accessToken)
-    const meRes = await fetch(meUrl.toString())
-    const me = await meRes.json()
-    const providerId = me?.id ? String(me.id) : ''
-    const email = me?.email ? String(me.email).trim().toLowerCase() : `fb_${providerId}@engsocial.local`
-    const name = me?.name || 'User'
-    const picture = me?.picture?.data?.url
-
-    if (!meRes.ok || !providerId) throw new Error('SOCIAL_TOKEN_INVALID')
+    const { providerId, email, name, picture } = await fetchFacebookUserProfile(accessToken)
 
     let user = await User.findOne({
       $or: [{ provider: 'facebook', providerId }, { email }],
@@ -304,7 +374,7 @@ export const loginWithFacebook = async ({ accessToken, io }) => {
       if (!user.emailVerified) {
         user.emailVerified = true
       }
-      if (picture && !user.avatar) {
+      if (shouldRefreshAvatarFromFacebook(user.avatar, picture)) {
         user.avatar = picture
         user.markModified('avatar')
       }
@@ -514,6 +584,62 @@ export const resetPassword = async ({ token, newPassword }) => {
   await PasswordResetToken.deleteOne({ _id: doc._id })
 
   return { ok: true }
+}
+
+/**
+ * Verify email with token from signup email link.
+ */
+export const verifyEmail = async ({ token, io }) => {
+  const doc = await EmailVerificationToken.findOne({ token })
+  if (!doc) throw new Error('VERIFY_TOKEN_INVALID')
+  if (doc.expiresAt < new Date()) {
+    await EmailVerificationToken.deleteOne({ _id: doc._id })
+    throw new Error('VERIFY_TOKEN_EXPIRED')
+  }
+
+  const user = await User.findById(doc.userId)
+  if (!user) throw new Error('USER_NOT_FOUND')
+
+  if (!user.emailVerified) {
+    user.emailVerified = true
+    if (user.status === 'pending') user.status = 'active'
+    await user.save()
+  }
+
+  await EmailVerificationToken.deleteOne({ _id: doc._id })
+
+  const { accessToken, refreshToken } = await beginUserSession(user._id, { io, notifyReplace: false })
+
+  return new AuthResponseDTO({
+    user,
+    accessToken,
+    refreshToken,
+  })
+}
+
+/**
+ * Resend signup verification email.
+ */
+export const resendVerificationEmail = async (email, lang = 'vi') => {
+  const normalizedEmail = String(email || '').trim().toLowerCase()
+  if (!normalizedEmail) return { ok: true }
+
+  const lastSent = resendVerifyCooldowns.get(normalizedEmail)
+  if (lastSent && Date.now() - lastSent < RESEND_VERIFY_COOLDOWN_MS) {
+    const waitSec = Math.ceil((RESEND_VERIFY_COOLDOWN_MS - (Date.now() - lastSent)) / 1000)
+    const err = new Error('VERIFY_RESEND_COOLDOWN')
+    err.waitSec = waitSec
+    throw err
+  }
+
+  const user = await User.findOne({ email: normalizedEmail })
+  if (!user || user.emailVerified || (user.provider && user.provider !== 'local')) {
+    return { ok: true }
+  }
+
+  resendVerifyCooldowns.set(normalizedEmail, Date.now())
+  await createAndSendVerificationEmail(user, lang)
+  return { ok: true, cooldownSec: Math.ceil(RESEND_VERIFY_COOLDOWN_MS / 1000) }
 }
 
 // In-memory OTP store for password change (TTL 10 minutes).
