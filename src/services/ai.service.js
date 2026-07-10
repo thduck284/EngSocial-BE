@@ -115,6 +115,21 @@ Target CEFR level: ${level}. Word limit: ${wordLimit.min}-${wordLimit.max} words
 - DO NOT reward effort or length. Only reward quality and accuracy.
 - Be honest. Students need accurate feedback to improve.
 
+## AI DETECTOR EVALUATION (mandatory):
+- Evaluate the probability that the student submission was generated or copied from an AI assistant (0-100%).
+- Look for typical AI indicators:
+  * Lack of any grammatical errors, unnatural phrasing, or minor typos (suspicious for non-native learners).
+  * Use of overly structured paragraphs (e.g. perfect intro-body-conclusion format, rigid sentence transitions).
+  * Overuse of AI-typical transition words and vocabulary: "delve", "testament", "furthermore", "moreover", "not only... but also", "in conclusion", "it is crucial to", "paramount", "beacon", "tapestry".
+  * Phrasing that feels generic, highly polished, and lacks a personal human tone or typical learning slips of CEFR ${level}.
+- Look for human indicators:
+  * Natural errors (minor typos, typical spelling mistakes, preposition errors, word choice mistakes).
+  * Simpler sentence patterns, irregular paragraph lengths, and conversational or authentic student tone.
+- Provide this value as an integer under "aiCopyPercent".
+  * 0-25%: Authentic human writing with natural slips and typical learner level.
+  * 26-60%: Human writing but possibly assisted by translators or grammar tools.
+  * 61-100%: Generated mostly or entirely by AI.
+
 ## OUTPUT FORMAT (return ONLY valid JSON, no other text):
 {
   "score": <C1+C2+C3+C4 integer 0-100>,
@@ -122,6 +137,7 @@ Target CEFR level: ${level}. Word limit: ${wordLimit.min}-${wordLimit.max} words
   "feedback": "Nhận xét tổng quát bằng tiếng Việt, nêu rõ điểm mạnh và điểm yếu chính...",
   "strengths": ["điểm tốt cụ thể 1", "điểm tốt cụ thể 2"],
   "improvements": ["điểm cần cải thiện cụ thể 1", "điểm cần cải thiện cụ thể 2"],
+  "aiCopyPercent": <integer 0-100 probability of AI generation/copying>,
   "grammarErrors": [
     {
       "original": "câu/cụm từ gốc có lỗi",
@@ -204,6 +220,8 @@ function normalizeGradeResult(raw) {
         }))
     : []
 
+  const aiCopyPercent = Math.max(0, Math.min(100, Number(raw?.aiCopyPercent) || 0))
+
   return {
     score,
     feedback: String(raw?.feedback ?? ''),
@@ -211,5 +229,6 @@ function normalizeGradeResult(raw) {
     improvements: Array.isArray(raw?.improvements) ? raw.improvements.map(String) : [],
     grammarErrors,
     breakdown,
+    aiCopyPercent,
   }
 }

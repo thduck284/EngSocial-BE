@@ -34,6 +34,7 @@ const attemptHistorySchema = new mongoose.Schema({
     humanGradedAt: Date,
     aiFeedback: String,
     aiScore: Number,
+    aiCopyPercent: Number,
     aiStrengths: [String],
     aiImprovements: [String],
     aiGrammarErrors: [{
@@ -79,6 +80,7 @@ const userLessonProgressSchema = new mongoose.Schema({
     humanGradedAt: Date,
     aiFeedback: String,
     aiScore: Number,
+    aiCopyPercent: Number,
     aiStrengths: [String],
     aiImprovements: [String],
     aiGrammarErrors: [{

@@ -148,7 +148,6 @@ export async function checkAndThrowIfViolation(text, { threshold = 50 } = {}) {
     violationScore: score,
     level,
     label: result.label || (level !== 'low' ? 'Vi phạm tiêu chuẩn cộng đồng' : 'Không vi phạm'),
-    keywords: aiKeywords,
     confidence: result.confidence ?? score,
   }
 

@@ -1,11 +1,48 @@
 import mongoose from 'mongoose'
 import Lesson from '../models/learning/Lesson.js'
 import UserLessonProgress from '../models/learning/UserLessonProgress.js'
+import { User } from '../models/index.js'
 import * as lessonService from '../services/lesson.service.js'
 import { LessonDTO, LessonDetailDTO } from '../dto/learning/response/lesson.response.js'
 import { sendSuccess, sendPaginated, sendError } from '../dto/index.js'
 import { generateUniqueSlug } from '../utils/slug.js'
 import { checkAndUnlockAchievements } from '../services/achievementUnlock.service.js'
+
+function sanitizeAiCopyPercent(data, isLecturer) {
+  if (isLecturer) return data
+  if (!data) return data
+
+  const obj = data.toObject ? data.toObject() : JSON.parse(JSON.stringify(data))
+
+  const cleanSubmission = (sub) => {
+    if (sub) {
+      delete sub.aiCopyPercent
+    }
+  }
+
+  if (Array.isArray(obj)) {
+    obj.forEach((item) => {
+      if (item.submission) cleanSubmission(item.submission)
+      if (Array.isArray(item.attemptHistory)) {
+        item.attemptHistory.forEach((att) => {
+          if (att.submission) cleanSubmission(att.submission)
+        })
+      }
+    })
+  } else {
+    if (obj.submission) {
+      cleanSubmission(obj.submission)
+    }
+    if (Array.isArray(obj.attemptHistory)) {
+      obj.attemptHistory.forEach((att) => {
+        if (att.submission) cleanSubmission(att.submission)
+      })
+    }
+  }
+
+  return obj
+}
+
 
 /**
  * Get lessons list with optional filters and pagination
@@ -88,7 +125,10 @@ export const getMyProgress = async (req, res, next) => {
       page: parseInt(page, 10) || 1,
       limit: Math.min(50, Math.max(1, parseInt(limit, 10) || 10)),
     })
-    return sendPaginated(res, { data: result.progress, pagination: result.pagination }, req)
+    const requestingUser = await User.findById(req.userId).select('role').lean()
+    const isLecturer = requestingUser && ['admin', 'moderator'].includes(requestingUser.role)
+    const sanitizedData = sanitizeAiCopyPercent(result.progress, isLecturer)
+    return sendPaginated(res, { data: sanitizedData, pagination: result.pagination }, req)
   } catch (error) {
     next(error)
   }
@@ -478,7 +518,10 @@ export const getLessonProgress = async (req, res, next) => {
     const { id } = req.params
     const { attemptNo } = req.query
     const data = await lessonService.getLessonProgressByUser(id, req.userId, { attemptNo })
-    return sendSuccess(res, { data }, req)
+    const requestingUser = await User.findById(req.userId).select('role').lean()
+    const isLecturer = requestingUser && ['admin', 'moderator'].includes(requestingUser.role)
+    const sanitizedData = sanitizeAiCopyPercent(data, isLecturer)
+    return sendSuccess(res, { data: sanitizedData }, req)
   } catch (error) {
     if (error.message === 'LESSON_NOT_FOUND') {
       return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
@@ -798,14 +841,18 @@ export const aiGradeWriting = async (req, res, next) => {
     const { id, userId } = req.params
     const { attemptNo, sessionCompletedAt } = req.body || {}
 
-    if (req.userId !== userId && !req.isModerator && !req.isAdmin) {
+    const requestingUser = await User.findById(req.userId).select('role').lean()
+    const isLecturer = requestingUser && ['admin', 'moderator'].includes(requestingUser.role)
+
+    if (req.userId !== userId && !isLecturer) {
       return sendError(res, { statusCode: 403, message: 'Forbidden' }, req)
     }
 
     const result = await lessonService.aiGradeWriting(id, userId, { attemptNo, sessionCompletedAt })
+    const sanitizedData = sanitizeAiCopyPercent(result, isLecturer)
     return sendSuccess(res, {
       message: 'AI grading completed',
-      data: result,
+      data: sanitizedData,
     }, req)
   } catch (error) {
     if (error.message === 'NO_SUBMISSION_CONTENT') {

@@ -1030,6 +1030,7 @@ function applyAiResultToSubmission(submission, aiResult) {
   if (!submission) return
   submission.aiScore = aiResult.score
   submission.aiFeedback = aiResult.feedback
+  submission.aiCopyPercent = aiResult.aiCopyPercent
   submission.aiStrengths = aiResult.strengths || []
   submission.aiImprovements = aiResult.improvements || []
   submission.aiGrammarErrors = aiResult.grammarErrors || []
@@ -1170,10 +1171,13 @@ export const aiGradeWriting = async (lessonId, userId, { attemptNo, sessionCompl
   })
 
   const srcSub = source.attempt?.submission
+  const isLatest = !source.attempt || Number(source.attempt.attemptNo) === Number(progress.attempts)
 
-  if (!progress.submission) progress.submission = {}
-  preserveSubmissionText(progress.submission, source.content, srcSub)
-  applyAiResultToSubmission(progress.submission, aiResult)
+  if (isLatest) {
+    if (!progress.submission) progress.submission = {}
+    preserveSubmissionText(progress.submission, source.content, srcSub)
+    applyAiResultToSubmission(progress.submission, aiResult)
+  }
 
   if (source.attempt) {
     if (!source.attempt.submission) source.attempt.submission = {}
