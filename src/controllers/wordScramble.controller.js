@@ -98,3 +98,26 @@ export const getGameResults = async (req, res, next) => {
     next(err)
   }
 }
+
+export const getSoloProgress = async (req, res, next) => {
+  try {
+    const result = await wordScrambleService.getSoloProgress(req.userId)
+    return sendSuccess(res, { data: result }, req)
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const updateSoloProgress = async (req, res, next) => {
+  try {
+    const { stage } = req.body
+    const result = await wordScrambleService.updateSoloProgress(req.userId, stage)
+    return sendSuccess(res, { data: result }, req)
+  } catch (err) {
+    if (err.message === 'INVALID_STAGE') {
+      return sendError(res, { statusCode: 400, message: 'Invalid stage parameter' }, req)
+    }
+    next(err)
+  }
+}
+

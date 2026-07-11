@@ -29,29 +29,77 @@ export function parseWordScrambleTsv(raw) {
   const headerLine = lines[0]
   if (!headerLine) return []
 
-  const header = headerLine.split('\t').map((c) => c.trim().toLowerCase())
+  // Auto detect separator: tab or comma
+  let separator = '\t'
+  if (headerLine.includes('\t')) {
+    separator = '\t'
+  } else if (headerLine.includes(',')) {
+    separator = ','
+  }
+
+  const header = headerLine.split(separator).map((c) => c.trim().toLowerCase())
   const iWord = header.indexOf('word')
   const iMean = header.indexOf('meaning')
   const iEx = header.indexOf('example')
   const iDiff = header.indexOf('difficulty')
   const iTopic = header.indexOf('topic')
+  const iSyns = header.indexOf('synonyms')
+  const iAnts = header.indexOf('antonyms')
+  const iTmpl = header.indexOf('sentencetemplate') // lowercase header matching
+  const iWrSent = header.indexOf('wrongsentence')
+  const iWrWord = header.indexOf('wrongword')
+  
   if (iWord < 0 || iMean < 0) return []
 
   const rows = []
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim()
     if (!line || line.startsWith('#')) continue
-    const cols = line.split('\t')
-    const word = (cols[iWord] || '').trim()
-    const meaning = (cols[iMean] || '').trim()
-    const example = iEx >= 0 ? (cols[iEx] || '').trim() : ''
-    const diffRaw = iDiff >= 0 ? (cols[iDiff] || '').trim() : ''
-    const topicRaw = iTopic >= 0 ? (cols[iTopic] || '').trim() : ''
+    
+    // Split by separator, but handle simple CSV wrapping quotes if CSV
+    let cols = []
+    if (separator === ',') {
+      // Basic CSV splitter that handles quotes
+      cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
+    } else {
+      cols = line.split('\t')
+    }
+
+    const cleanCell = (val) => {
+      let s = (val || '').trim()
+      if (s.startsWith('"') && s.endsWith('"')) {
+        s = s.slice(1, -1).replace(/""/g, '"').trim()
+      }
+      return s
+    }
+
+    const word = cleanCell(cols[iWord])
+    const meaning = cleanCell(cols[iMean])
+    const example = iEx >= 0 ? cleanCell(cols[iEx]) : ''
+    const diffRaw = iDiff >= 0 ? cleanCell(cols[iDiff]) : ''
+    const topicRaw = iTopic >= 0 ? cleanCell(cols[iTopic]) : ''
+    const synsRaw = iSyns >= 0 ? cleanCell(cols[iSyns]) : ''
+    const antsRaw = iAnts >= 0 ? cleanCell(cols[iAnts]) : ''
+    const tmplRaw = iTmpl >= 0 ? cleanCell(cols[iTmpl]) : ''
+    const wrSentRaw = iWrSent >= 0 ? cleanCell(cols[iWrSent]) : ''
+    const wrWordRaw = iWrWord >= 0 ? cleanCell(cols[iWrWord]) : ''
+    
     if (!word) continue
     const row = { word, meaning }
     if (example) row.example = example
     if (diffRaw) row.difficulty = diffRaw
     if (topicRaw) row.topic = topicRaw
+    
+    if (synsRaw) {
+      row.synonyms = synsRaw.split(',').map(s => s.trim()).filter(Boolean)
+    }
+    if (antsRaw) {
+      row.antonyms = antsRaw.split(',').map(a => a.trim()).filter(Boolean)
+    }
+    if (tmplRaw) row.sentenceTemplate = tmplRaw
+    if (wrSentRaw) row.wrongSentence = wrSentRaw
+    if (wrWordRaw) row.wrongWord = wrWordRaw
+    
     rows.push(row)
   }
   return rows

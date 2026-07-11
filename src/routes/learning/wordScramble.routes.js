@@ -29,4 +29,8 @@ router.delete('/words/:id', auth, requireModeratorOrAdmin, wordScrambleControlle
 /** Multiplayer Results */
 router.get('/results/:roomCode', auth, wordScrambleController.getGameResults)
 
+/** Solo progress */
+router.get('/progress', auth, wordScrambleController.getSoloProgress)
+router.post('/progress', auth, wordScrambleController.updateSoloProgress)
+
 export default router

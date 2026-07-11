@@ -1,5 +1,5 @@
 import mongoose from 'mongoose'
-import { WordScrambleWord } from '../models/index.js'
+import { WordScrambleWord, UserWordScrambleProgress, User } from '../models/index.js'
 import {
   inferWordScrambleDifficultyFromLength,
   normalizeWordScrambleDifficulty,
@@ -58,6 +58,12 @@ function serializeWord(doc) {
     word: doc.word,
     meaning: doc.meaning,
     example: doc.example || '',
+    synonyms: doc.synonyms || [],
+    antonyms: doc.antonyms || [],
+    sentenceTemplate: doc.sentenceTemplate || '',
+    wrongSentence: doc.wrongSentence || '',
+    wrongWord: doc.wrongWord || '',
+    emoji: doc.emoji || '',
     difficulty: doc.difficulty,
     topic: doc.topic || '',
     isActive: doc.isActive !== false,
@@ -192,6 +198,11 @@ export async function importWordsFromTsv(rawText) {
       example: String(row.example || '').trim(),
       difficulty: tier,
       topic: String(row.topic || '').trim(),
+      synonyms: row.synonyms || [],
+      antonyms: row.antonyms || [],
+      sentenceTemplate: String(row.sentenceTemplate || '').trim(),
+      wrongSentence: String(row.wrongSentence || '').trim(),
+      wrongWord: String(row.wrongWord || '').trim(),
     })
   }
 
@@ -216,6 +227,11 @@ export async function importWordsFromTsv(rawText) {
           example: doc.example,
           difficulty: doc.difficulty,
           topic: doc.topic,
+          synonyms: doc.synonyms,
+          antonyms: doc.antonyms,
+          sentenceTemplate: doc.sentenceTemplate,
+          wrongSentence: doc.wrongSentence,
+          wrongWord: doc.wrongWord,
           isActive: true,
         },
       },
@@ -252,7 +268,57 @@ export async function getRandomWord(opts) {
     word: doc.word,
     meaning: doc.meaning,
     example: doc.example || undefined,
+    synonyms: doc.synonyms || [],
+    antonyms: doc.antonyms || [],
+    sentenceTemplate: doc.sentenceTemplate || '',
+    wrongSentence: doc.wrongSentence || '',
+    wrongWord: doc.wrongWord || '',
+    emoji: doc.emoji || '',
     difficulty: doc.difficulty,
     topic: doc.topic || '',
+  }
+}
+
+export async function getSoloProgress(userId) {
+  let progress = await UserWordScrambleProgress.findOne({ userId })
+  if (!progress) {
+    progress = await UserWordScrambleProgress.create({ userId, currentStage: 1, maxStageReached: 1 })
+  }
+  return {
+    currentStage: progress.currentStage,
+    maxStageReached: progress.maxStageReached,
+  }
+}
+
+export async function updateSoloProgress(userId, stage) {
+  let progress = await UserWordScrambleProgress.findOne({ userId })
+  if (!progress) {
+    progress = new UserWordScrambleProgress({ userId })
+  }
+
+  const numericStage = Number(stage)
+  if (Number.isNaN(numericStage) || numericStage < 1) {
+    throw new Error('INVALID_STAGE')
+  }
+
+  progress.currentStage = numericStage
+  if (numericStage > progress.maxStageReached) {
+    progress.maxStageReached = numericStage
+  }
+  await progress.save()
+
+  const xpReward = 20
+  const coinReward = 5
+  const userDoc = await User.findById(userId)
+  if (userDoc) {
+    userDoc.awardXp(xpReward)
+    await userDoc.save()
+  }
+
+  return {
+    currentStage: progress.currentStage,
+    maxStageReached: progress.maxStageReached,
+    xpAwarded: xpReward,
+    coinsAwarded: coinReward,
   }
 }
