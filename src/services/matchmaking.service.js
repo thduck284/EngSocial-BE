@@ -62,16 +62,35 @@ export const getMatchmakingProfile = async (userId, partySize) => {
  * @param {string} hostId
  * @param {any[]} queueEntities Danh sách các thực thể (Solo hoặc Group) đã có profile
  * @param {number} partySize
+ * @param {{ hostPartyUserIds?: string[], hostEntityId?: string }} [opts]
  */
-export const callMatchmakingAI = async (hostId, queueEntities, partySize) => {
-  const hostProfile = await getMatchmakingProfile(hostId, partySize)
-  
-  const payload = {
-    partySize,
-    host: {
+export const callMatchmakingAI = async (hostId, queueEntities, partySize, opts = {}) => {
+  const hostPartyUserIds = Array.isArray(opts.hostPartyUserIds)
+    ? opts.hostPartyUserIds.map(String).filter(Boolean)
+    : []
+  const hostEntityId = opts.hostEntityId || hostId.toString()
+
+  let hostPayload
+  if (hostPartyUserIds.length > 1) {
+    const profiles = await Promise.all(
+      hostPartyUserIds.map((uid) => getMatchmakingProfile(uid, partySize)),
+    )
+    hostPayload = {
+      entityId: hostEntityId,
+      users: profiles.flatMap((p) => p.users),
+      type: 'group',
+    }
+  } else {
+    const hostProfile = await getMatchmakingProfile(hostId, partySize)
+    hostPayload = {
       ...hostProfile,
       type: 'solo',
-    },
+    }
+  }
+
+  const payload = {
+    partySize,
+    host: hostPayload,
     queue: queueEntities.map(p => ({
       ...p,
       type: p.users?.length > 1 ? 'group' : 'solo',

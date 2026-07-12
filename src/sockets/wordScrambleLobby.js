@@ -114,6 +114,95 @@ function broadcastWordScrambleStarted(io, code, room, startedPayload) {
   }
 }
 
+function inRoomUserIds(occupied) {
+  return new Set(occupied.map((s) => String(s.userId)))
+}
+
+/** Kéo một người từ hàng chờ vào phòng private. */
+function pullQueueMemberIntoRoom(io, code, room, occupied, publicQueue, member) {
+  const inRoom = inRoomUserIds(occupied)
+  if (inRoom.has(String(member.userId))) return false
+
+  const qIdx = publicQueue.findIndex((m) => String(m.userId) === String(member.userId))
+  if (qIdx >= 0) publicQueue.splice(qIdx, 1)
+
+  const emptySlotIdx = room.slots.findIndex((s) => s === null)
+  if (emptySlotIdx < 0) return false
+
+  room.slots[emptySlotIdx] = { ...member, ready: true }
+  occupied.push(room.slots[emptySlotIdx])
+
+  const qs = io.sockets.sockets.get(member.socketId)
+  if (qs) {
+    qs.join(roomChannel(code))
+    setLobbyRoomCode(qs, code)
+  }
+  emitToUser(io, String(member.userId), 'wordScrambleLobby:matching', {})
+  emitToUser(io, String(member.userId), 'wordScrambleLobby:state', sanitizeObject({ ...room, findingMatch: true }))
+  console.log(`[Lobby] [Private] Pulled ${member.name} (${member.userId}) from queue into ${code}`)
+  return true
+}
+
+/** Sáp nhập phòng private khác vào phòng hiện tại. */
+function mergePrivateRoomInto(io, code, room, occupied, targetRoomCode) {
+  const targetRoom = rooms.get(targetRoomCode)
+  if (!targetRoom || targetRoomCode === code) return false
+
+  const incomingMembers = targetRoom.slots.filter(Boolean)
+  if (incomingMembers.length === 0) return false
+  if (occupied.length + incomingMembers.length > room.capacity) return false
+
+  console.log(`[Lobby] [MERGE] Merging room ${targetRoomCode} into ${code}`)
+  for (const member of incomingMembers) {
+    const emptySlotIdx = room.slots.findIndex((s) => s === null)
+    if (emptySlotIdx < 0) break
+    room.slots[emptySlotIdx] = {
+      userId: String(member.userId),
+      name: member.name,
+      avatar: member.avatar,
+      socketId: member.socketId,
+      ready: true,
+      joinedAt: Date.now(),
+    }
+    occupied.push(room.slots[emptySlotIdx])
+  }
+  reassignSocketsAfterRoomMerge(io, targetRoomCode, code)
+  cancelEmptyRoomDeletion(targetRoomCode)
+  rooms.delete(targetRoomCode)
+  return true
+}
+
+/** Fallback khi AI không đủ người — kéo từ queue / ghép phòng private khác (giống quick match). */
+function fillPrivateRoomFallback(io, code, room, occupied, publicQueue, otherRooms) {
+  const inRoom = inRoomUserIds(occupied)
+  let pulled = 0
+
+  while (occupied.length < room.capacity && publicQueue.length > 0) {
+    const qIdx = publicQueue.findIndex((m) => m && !inRoom.has(String(m.userId)))
+    if (qIdx < 0) break
+    const member = publicQueue[qIdx]
+    if (pullQueueMemberIntoRoom(io, code, room, occupied, publicQueue, member)) {
+      inRoom.add(String(member.userId))
+      pulled += 1
+    } else {
+      break
+    }
+  }
+
+  for (const otherRoom of otherRooms) {
+    if (occupied.length >= room.capacity) break
+    if (mergePrivateRoomInto(io, code, room, occupied, otherRoom.code)) {
+      for (const s of occupied) inRoom.add(String(s.userId))
+      pulled += 1
+    }
+  }
+
+  if (pulled > 0) {
+    console.log(`[Lobby] [Private] Fallback filled ${pulled} slot(s) for ${code} (${occupied.length}/${room.capacity})`)
+  }
+  return pulled
+}
+
 const loadProfile = async (userId) => {
   const user = await User.findById(userId).select('name avatar level').lean()
   return {
@@ -454,37 +543,41 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
     console.log(`[Lobby] [Private] AI Polling for ${code}...`)
     
     const publicQueue = globalQueues.get(room.capacity) || []
+    const inRoomIds = inRoomUserIds(occupied)
     
     // Tìm các phòng Private khác (PHẢI CÓ RADAR ĐANG BẬT VÀ CÒN CHỖ TRỐNG)
     const otherRooms = Array.from(rooms.values()).filter(r => 
       r.code !== code && 
       r.capacity === room.capacity && 
-      r.lastMatchRequest && (Date.now() - r.lastMatchRequest) < 10000 && 
+      r.lastMatchRequest && (Date.now() - r.lastMatchRequest) < 30000 && 
       r.slots.filter(Boolean).length < r.capacity
     )
 
-    // Chuẩn bị danh sách "Thực thể" (Entities) cho AI
-    // 1. Entities từ sảnh chờ công khai (mỗi người 1 entity)
-    const queueEntities = await Promise.all(publicQueue.map(m => matchmakingService.getMatchmakingProfile(m.userId, room.capacity)))
+    // Chuẩn bị danh sách "Thực thể" (Entities) cho AI — loại người đã ở phòng
+    const queueMembers = publicQueue.filter((m) => m && !inRoomIds.has(String(m.userId)))
+    const queueEntities = await Promise.all(queueMembers.map(m => matchmakingService.getMatchmakingProfile(m.userId, room.capacity)))
     
-    // 2. Entities từ các phòng Private khác (mỗi phòng 1 entity gồm nhiều người)
     const otherRoomEntities = await Promise.all(otherRooms.map(async (r) => {
       const members = r.slots.filter(Boolean)
       const profiles = await Promise.all(members.map(m => matchmakingService.getMatchmakingProfile(m.userId, room.capacity)))
       return {
-        entityId: `room:${r.code}`, // Đánh dấu đây là thực thể phòng
+        entityId: `room:${r.code}`,
         users: profiles.flatMap(p => p.users)
       }
     }))
 
-    const existingOtherUserIds = occupied.filter(s => String(s.userId) !== String(room.hostId)).map(s => String(s.userId))
+    const hostPartyUserIds = occupied.map((s) => String(s.userId))
     
-    // Gọi AI với tất cả ứng viên
+    // Gọi AI với party hiện tại (group nếu >1 người) + hàng chờ quick match
     const aiResult = await matchmakingService.callMatchmakingAI(
       room.hostId, 
       [...queueEntities, ...otherRoomEntities], 
-      room.capacity
-    ).catch(() => null)
+      room.capacity,
+      { hostPartyUserIds, hostEntityId: `room:${code}` },
+    ).catch((err) => {
+      console.warn('[Lobby] [Private] AI matchmaking failed:', err?.message)
+      return null
+    })
 
     const matchEntityIdsFromAI = aiResult?.output?.ketQuaGhepNhom || []
     const occupiedCountBeforePull = occupied.length
@@ -493,56 +586,21 @@ export function registerWordScrambleLobbyHandlers(io, socket) {
       for (const eid of matchEntityIdsFromAI) {
         if (occupied.length >= room.capacity) break
         
-        if (eid.startsWith('room:')) {
-          // KỊCH BẢN SÁP NHẬP PHÒNG
-          const targetRoomCode = eid.split(':')[1]
-          const targetRoom = rooms.get(targetRoomCode)
-          if (targetRoom) {
-            const incomingMembers = targetRoom.slots.filter(Boolean)
-            if (occupied.length + incomingMembers.length <= room.capacity) {
-              console.log(`[Lobby] [MERGE] Merging room ${targetRoomCode} into ${code}`)
-              
-              for (const member of incomingMembers) {
-                const emptySlotIdx = room.slots.findIndex(s => s === null)
-                if (emptySlotIdx >= 0) {
-                  room.slots[emptySlotIdx] = { 
-                    userId: String(member.userId), 
-                    name: member.name, 
-                    avatar: member.avatar,
-                    socketId: member.socketId,
-                    ready: true,
-                    joinedAt: Date.now()
-                  }
-                  occupied.push(room.slots[emptySlotIdx])
-                  
-                  console.log(`[Lobby] [MERGE] Pulled member ${member.name} (${member.userId}) into room ${code} at slot ${emptySlotIdx}`)
-                }
-              }
-              // Cập nhật mọi socket vẫn trỏ phòng bị merge (data + join room) — tránh setReady/chat/start dùng mã phòng đã xóa
-              reassignSocketsAfterRoomMerge(io, targetRoomCode, code)
-              // Giải tán phòng cũ
-              cancelEmptyRoomDeletion(targetRoomCode)
-              rooms.delete(targetRoomCode)
-            }
-          }
+        if (String(eid).startsWith('room:')) {
+          const targetRoomCode = String(eid).split(':')[1]
+          mergePrivateRoomInto(io, code, room, occupied, targetRoomCode)
         } else {
-          // KỊCH BẢN KÉO TỪ HÀNG CHỜ CÔNG KHAI (Như cũ)
-          const qIdx = publicQueue.findIndex(m => String(m.userId) === eid)
+          const qIdx = publicQueue.findIndex(m => String(m.userId) === String(eid))
           if (qIdx >= 0) {
-            const matchedMember = publicQueue.splice(qIdx, 1)[0]
-            const emptySlotIdx = room.slots.findIndex(s => s === null)
-            if (emptySlotIdx >= 0) {
-              room.slots[emptySlotIdx] = { ...matchedMember, ready: true }
-              occupied.push(room.slots[emptySlotIdx])
-              const qs = io.sockets.sockets.get(matchedMember.socketId)
-              if (qs) {
-                qs.join(roomChannel(code))
-                setLobbyRoomCode(qs, code)
-              }
-            }
+            pullQueueMemberIntoRoom(io, code, room, occupied, publicQueue, publicQueue[qIdx])
           }
         }
       }
+    }
+
+    // Fallback: AI trả rỗng / thiếu người → kéo trực tiếp từ quick-match queue (cùng logic queue đầy)
+    if (occupied.length < room.capacity) {
+      fillPrivateRoomFallback(io, code, room, occupied, publicQueue, otherRooms)
     }
 
     // Người mới merge / kéo từ queue không có ở slots lúc broadcast đầu — bắn lại state + matching cho đủ socket
