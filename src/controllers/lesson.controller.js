@@ -211,12 +211,46 @@ export const getLessonById = async (req, res, next) => {
 }
 
 /**
- * Create lesson (admin)
+ * Helper: check if requesting moderator is allowed to operate on a lesson of a given level.
+ * Admin always passes. Moderator must have matching moderatorLevel.
+ * @param {string} requesterId - req.userId
+ * @param {string} lessonLevel - lesson's level field (e.g. 'B1')
+ * @param {import('express').Response} res
+ * @param {import('express').Request} req
+ * @returns {Promise<boolean>} true if allowed, false if error was already sent
+ */
+async function checkModeratorLevel(requesterId, lessonLevel, res, req) {
+  const requester = await User.findById(requesterId).select('role moderatorLevel').lean()
+  if (!requester) {
+    sendError(res, { statusCode: 401, message: 'Unauthorized' }, req)
+    return false
+  }
+  if (requester.role === 'admin') return true
+  if (requester.role === 'moderator') {
+    if (!requester.moderatorLevel || requester.moderatorLevel !== lessonLevel) {
+      sendError(res, {
+        statusCode: 403,
+        message: `Moderator level '${requester.moderatorLevel || 'none'}' is not allowed to operate on level '${lessonLevel}' lessons.`,
+      }, req)
+      return false
+    }
+    return true
+  }
+  sendError(res, { statusCode: 403, message: 'Forbidden' }, req)
+  return false
+}
+
+/**
+ * Create lesson (admin/moderator)
  * POST /api/lessons
  */
 export const createLesson = async (req, res, next) => {
   try {
     const body = req.body
+    const lessonLevel = body.level || 'A1'
+    const allowed = await checkModeratorLevel(req.userId, lessonLevel, res, req)
+    if (!allowed) return
+
     const slug = body.slug || generateUniqueSlug(body.title || 'lesson')
     const existing = await Lesson.findOne({ slug })
     if (existing) {
@@ -227,7 +261,7 @@ export const createLesson = async (req, res, next) => {
       title: body.title,
       slug,
       skill: body.skill || 'reading',
-      level: body.level || 'A1',
+      level: lessonLevel,
       category: body.category || 'lesson',
       topic: body.topic,
       description: body.description,
@@ -257,7 +291,7 @@ export const createLesson = async (req, res, next) => {
 }
 
 /**
- * Update lesson (admin)
+ * Update lesson (admin/moderator)
  * PUT /api/lessons/:id
  */
 export const updateLesson = async (req, res, next) => {
@@ -267,13 +301,16 @@ export const updateLesson = async (req, res, next) => {
     if (!lesson) {
       return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
     }
+    const allowed = await checkModeratorLevel(req.userId, lesson.level, res, req)
+    if (!allowed) return
+
     const body = req.body
-    const allowed = [
+    const allowedFields = [
       'title', 'slug', 'skill', 'level', 'category', 'topic', 'description', 'thumbnail',
       'content', 'questions', 'vocabulary', 'estimatedTime', 'xpReward', 'totalQuestions',
       'featured', 'time', 'accent', 'practiceType', 'length', 'order', 'tags',
     ]
-    for (const key of allowed) {
+    for (const key of allowedFields) {
       if (body[key] !== undefined) {
         lesson[key] = body[key]
       }
@@ -290,16 +327,20 @@ export const updateLesson = async (req, res, next) => {
 }
 
 /**
- * Delete lesson (admin)
+ * Delete lesson (admin/moderator)
  * DELETE /api/lessons/:id
  */
 export const deleteLesson = async (req, res, next) => {
   try {
     const { id } = req.params
-    const deleted = await Lesson.findByIdAndDelete(id)
-    if (!deleted) {
+    const lesson = await Lesson.findById(id)
+    if (!lesson) {
       return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
     }
+    const allowed = await checkModeratorLevel(req.userId, lesson.level, res, req)
+    if (!allowed) return
+
+    await Lesson.findByIdAndDelete(id)
     return sendSuccess(res, { message: 'Deleted' }, req)
   } catch (error) {
     next(error)
@@ -808,6 +849,8 @@ export const syncLessonQuizScores = async (req, res, next) => {
 /**
  * Grade user writing submission (Admin/Mod)
  * POST /api/lessons/:id/grade/:userId
+ * Note: For writing skill, moderator's level must match lesson level.
+ *       For reading/listening, level check is skipped for grading.
  */
 export const gradeUserWriting = async (req, res, next) => {
   try {
@@ -816,6 +859,13 @@ export const gradeUserWriting = async (req, res, next) => {
     
     if (score === undefined || score === null) {
       return sendError(res, { statusCode: 400, message: 'Score is required' }, req)
+    }
+
+    // For writing lessons, enforce moderator level check
+    const lesson = await Lesson.findById(id).select('skill level').lean()
+    if (lesson && lesson.skill === 'writing') {
+      const allowed = await checkModeratorLevel(req.userId, lesson.level, res, req)
+      if (!allowed) return
     }
 
     const result = await lessonService.gradeUserWriting(id, userId, { score, feedback, attemptNo })

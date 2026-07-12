@@ -121,6 +121,11 @@ const userSchema = new mongoose.Schema({
     enum: ['user', 'admin', 'moderator'],
     default: 'user',
   },
+  moderatorLevel: {
+    type: String,
+    enum: ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', ''],
+    default: '',
+  },
   status: {
     type: String,
     enum: ['active', 'inactive', 'banned', 'pending'],

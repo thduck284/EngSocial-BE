@@ -23,6 +23,7 @@ export class UserDTO extends BaseDTO {
       lastActiveDate: user.lastActiveDate,
       preferences: user.preferences,
       role: user.role,
+      moderatorLevel: user.moderatorLevel ?? '',
       status: user.status,
       statusUntil: user.statusUntil ?? null,
       provider: user.provider,
