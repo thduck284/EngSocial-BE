@@ -9,12 +9,13 @@ import { checkAndUnlockAchievements } from '../services/achievementUnlock.servic
 export const register = async (req, res, next) => {
   try {
     const { email, password, name, gender, dateOfBirth } = req.body
+    const lang = req.language || 'vi'
 
-    const data = await authService.register({ email, password, name, gender, dateOfBirth })
+    const data = await authService.register({ email, password, name, gender, dateOfBirth }, lang)
 
     return sendSuccess(res, {
       statusCode: 201,
-      messageKey: 'auth.registerSuccess',
+      messageKey: 'auth.registerVerifyEmail',
       data,
     }, req)
   } catch (error) {
@@ -68,6 +69,12 @@ export const login = async (req, res, next) => {
       return sendError(res, {
         statusCode: 403,
         messageKey: 'auth.accountInactive',
+      }, req)
+    }
+    if (error.message === 'EMAIL_NOT_VERIFIED') {
+      return sendError(res, {
+        statusCode: 403,
+        messageKey: 'auth.emailNotVerified',
       }, req)
     }
     next(error)
@@ -305,6 +312,61 @@ export const resetPassword = async (req, res, next) => {
 }
 
 /**
+ * Verify email with token from signup link
+ * POST /api/auth/verify-email
+ */
+export const verifyEmail = async (req, res, next) => {
+  try {
+    const { token } = req.body
+    const data = await authService.verifyEmail({ token, io: req.app.get('io') })
+    return sendSuccess(res, {
+      messageKey: 'auth.emailVerifiedSuccess',
+      data,
+    }, req)
+  } catch (error) {
+    if (error.message === 'VERIFY_TOKEN_INVALID' || error.message === 'VERIFY_TOKEN_EXPIRED') {
+      return sendError(res, {
+        statusCode: 400,
+        messageKey: 'auth.verifyTokenInvalid',
+      }, req)
+    }
+    if (error.message === 'USER_NOT_FOUND') {
+      return sendError(res, {
+        statusCode: 404,
+        messageKey: 'auth.userNotFound',
+      }, req)
+    }
+    next(error)
+  }
+}
+
+/**
+ * Resend signup verification email
+ * POST /api/auth/resend-verification
+ */
+export const resendVerification = async (req, res, next) => {
+  try {
+    const { email } = req.body
+    const lang = req.language || 'vi'
+    const result = await authService.resendVerificationEmail(email, lang)
+    return sendSuccess(res, {
+      messageKey: 'auth.resendVerificationSuccess',
+      data: { cooldownSec: result.cooldownSec },
+    }, req)
+  } catch (error) {
+    if (error.message === 'VERIFY_RESEND_COOLDOWN') {
+      return sendError(res, {
+        statusCode: 429,
+        messageKey: 'auth.verifyResendCooldown',
+        messageParams: { waitSec: error.waitSec },
+        data: { waitSec: error.waitSec },
+      }, req)
+    }
+    next(error)
+  }
+}
+
+/**
  * Change password (authenticated)
  * POST /api/user/change-password
  */
@@ -350,6 +412,7 @@ export const requestPasswordChange = async (req, res, next) => {
       return sendError(res, {
         statusCode: 429,
         messageKey: 'user.otpCooldown',
+        messageParams: { waitSec: error.waitSec },
         data: { waitSec: error.waitSec },
       }, req)
     }

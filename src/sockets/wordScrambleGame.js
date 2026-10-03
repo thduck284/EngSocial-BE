@@ -38,17 +38,7 @@ const scheduleRoundTimeout = (io, game) => {
     const everyoneOut = game.players.every(p => p.isOut)
 
     if (everyoneOut) {
-      game.status = 'finished'
-      io.to(roomChannel(game.roomCode)).emit('wordScrambleGame:ended', {
-        game,
-        reason: 'all_out',
-        roundId: roundIdAtSchedule,
-      })
-      saveGameResults(game)
-      // Clean up from memory after 10 minutes
-      setTimeout(() => {
-        activeGames.delete(game.roomCode)
-      }, 10 * 60 * 1000)
+      finishGame(io, game, 'all_out', { roundId: roundIdAtSchedule })
     } else {
       // Should not happen in "shared word" mode unless we change how it works.
       // But for robustness: move to next word if there are survivors
@@ -150,9 +140,70 @@ const saveGameResults = async (game) => {
 // Lưu trữ trạng thái game tạm thời trong RAM (trong sản xuất nên dùng Redis)
 // code -> { players: [{userId, name, score, streak}], currentWord: {word, meaning, example}, turnIndex: 0 }
 export const activeGames = new Map()
+const finishedGames = new Map()
+
+function normalizeRoomCode(code) {
+  return String(code || '').trim().toUpperCase()
+}
+
+function archiveFinishedGame(game) {
+  if (!game?.roomCode) return
+  const key = normalizeRoomCode(game.roomCode)
+  finishedGames.set(key, {
+    roomCode: key,
+    players: game.players.map((p) => ({ ...p })),
+    status: 'finished',
+    difficulty: game.difficulty,
+    startTime: game.startTime,
+    endTime: game.endTime || Date.now(),
+    currentRoundId: game.currentRoundId,
+  })
+  setTimeout(() => finishedGames.delete(key), 10 * 60 * 1000)
+}
+
+function finishGame(io, game, reason, extra = {}) {
+  if (!game || game.status === 'finished') return
+  game.status = 'finished'
+  const key = normalizeRoomCode(game.roomCode)
+  clearRoundTimer(key)
+  io.to(roomChannel(key)).emit('wordScrambleGame:ended', {
+    game,
+    reason,
+    ...extra,
+  })
+  saveGameResults(game)
+  archiveFinishedGame(game)
+  setTimeout(() => {
+    activeGames.delete(key)
+  }, 10 * 60 * 1000)
+}
+
+async function slotToPlayer(slot) {
+  let name = slot?.name
+  let avatar = slot?.avatar
+  if (!name || !avatar) {
+    const user = await User.findById(slot.userId).select('name avatar').lean()
+    if (user) {
+      name = name || user.name || 'Unknown'
+      avatar = avatar || user.avatar || ''
+    }
+  }
+  return {
+    userId: String(slot.userId),
+    name: name || 'Unknown',
+    avatar: avatar || '',
+    score: 0,
+    streak: 0,
+    maxStreak: 0,
+    correctCount: 0,
+    isOut: false,
+    ready: true,
+  }
+}
 
 export function getGameResult(roomCode) {
-  return activeGames.get(roomCode)
+  const key = normalizeRoomCode(roomCode)
+  return finishedGames.get(key) || activeGames.get(key) || activeGames.get(roomCode)
 }
 
 export function registerWordScrambleGameHandlers(io, socket, rooms) {
@@ -160,34 +211,27 @@ export function registerWordScrambleGameHandlers(io, socket, rooms) {
   if (!userId) return
 
   socket.on('wordScrambleGame:join', async ({ roomCode, difficulty }, ack) => {
-    const room = rooms.get(roomCode)
+    const code = normalizeRoomCode(roomCode)
+    const room = rooms.get(code) || rooms.get(roomCode)
     if (!room) return ack?.({ ok: false, error: 'room_not_found' })
 
-    socket.join(roomChannel(roomCode))
+    socket.join(roomChannel(code))
     
     // Khởi tạo game nếu chưa có
-    if (!activeGames.has(roomCode)) {
+    if (!activeGames.has(code)) {
       const level = ['easy', 'medium', 'hard'].includes(String(difficulty || '').toLowerCase())
         ? String(difficulty).toLowerCase()
         : 'medium'
       const startTime = Date.now()
       const durationSec = 180 // 3 minutes total
-      const participants = room.slots.filter(Boolean)
-      console.log(`[Game] Initializing game ${roomCode} with ${participants.length} players:`, participants.map(p => p.name))
+      const snapshot = Array.isArray(room.playerSnapshot) ? room.playerSnapshot : []
+      const participants = snapshot.length > 0 ? snapshot : room.slots.filter(Boolean)
+      console.log(`[Game] Initializing game ${code} with ${participants.length} players:`, participants.map(p => p.name))
       
-      activeGames.set(roomCode, {
-        roomCode,
-        players: participants.map(s => ({
-          userId: s.userId,
-          name: s.name,
-          avatar: s.avatar,
-          score: 0,
-          streak: 0,
-          maxStreak: 0,
-          correctCount: 0,
-          isOut: false,
-          ready: true
-        })),
+      const players = await Promise.all(participants.map(slotToPlayer))
+      activeGames.set(code, {
+        roomCode: code,
+        players,
         currentWord: null,
         turnIndex: 0,
         status: 'playing',
@@ -200,54 +244,40 @@ export function registerWordScrambleGameHandlers(io, socket, rooms) {
 
       // Global game timer check
       const globalCheck = setInterval(() => {
-        const g = activeGames.get(roomCode)
+        const g = activeGames.get(code)
         if (!g || g.status !== 'playing') {
           clearInterval(globalCheck)
           return
         }
         if (Date.now() >= g.endTime) {
-          g.status = 'finished'
-          io.to(roomChannel(roomCode)).emit('wordScrambleGame:ended', {
-            game: g,
-            reason: 'total_time_up',
-          })
-          saveGameResults(g)
-          // Clean up from memory after 10 minutes
-          setTimeout(() => {
-            activeGames.delete(roomCode)
-          }, 10 * 60 * 1000)
+          finishGame(io, g, 'total_time_up')
           clearInterval(globalCheck)
         }
       }, 1000)
     }
 
-    const gameState = activeGames.get(roomCode)
+    const gameState = activeGames.get(code)
     if (!gameState) return ack?.({ ok: false, error: 'game_not_found' })
 
-    // Đảm bảo toàn bộ người trong room.slots đều được đồng bộ vào gameState.players
-    const currentRoomSlots = room.slots.filter(Boolean)
+    // Đảm bảo toàn bộ người trong room được đồng bộ vào gameState.players
+    const snapshot = Array.isArray(room.playerSnapshot) ? room.playerSnapshot : []
+    const currentRoomSlots = snapshot.length > 0 ? snapshot : room.slots.filter(Boolean)
     let syncCount = 0
     
-    currentRoomSlots.forEach(slot => {
+    for (const slot of currentRoomSlots) {
       const slotUserId = String(slot.userId)
       const exists = gameState.players.find(p => String(p.userId) === slotUserId)
       
       if (!exists) {
         syncCount++
         console.log(`[Game] [SYNC] Adding missing player ${slot.name} (${slotUserId}) to game ${roomCode}`)
-        gameState.players.push({
-          userId: slotUserId,
-          name: slot.name,
-          avatar: slot.avatar,
-          score: 0,
-          streak: 0,
-          maxStreak: 0,
-          correctCount: 0,
-          isOut: false,
-          ready: true
-        })
+        gameState.players.push(await slotToPlayer(slot))
+      } else if (!exists.name || !exists.avatar) {
+        const enriched = await slotToPlayer({ ...slot, name: exists.name, avatar: exists.avatar })
+        exists.name = enriched.name
+        exists.avatar = enriched.avatar
       }
-    })
+    }
 
     if (syncCount > 0) {
       console.log(`[Game] [SYNC] Total ${syncCount} players synced into ${roomCode}. Current player count: ${gameState.players.length}`)
@@ -264,14 +294,15 @@ export function registerWordScrambleGameHandlers(io, socket, rooms) {
     ack?.({ ok: true, state: gameState })
     
     // Luôn phát update cho mọi người để đảm bảo frontend vẽ lại đúng danh sách
-    io.to(roomChannel(roomCode)).emit('wordScrambleGame:update', {
+    io.to(roomChannel(code)).emit('wordScrambleGame:update', {
       game: gameState,
       lastAction: { userId: String(userId), type: 'sync_join' }
     })
   })
 
   socket.on('wordScrambleGame:submit', async ({ roomCode, answer, roundId }, ack) => {
-    const game = activeGames.get(roomCode)
+    const code = normalizeRoomCode(roomCode)
+    const game = activeGames.get(code)
     if (!game) return ack?.({ ok: false, error: 'game_not_found' })
 
     const playerIdx = game.players.findIndex(p => String(p.userId) === String(userId))
@@ -313,7 +344,7 @@ export function registerWordScrambleGameHandlers(io, socket, rooms) {
     }
 
     // Phát tín hiệu cập nhật toàn bộ phòng
-    io.to(roomChannel(roomCode)).emit('wordScrambleGame:update', {
+    io.to(roomChannel(code)).emit('wordScrambleGame:update', {
       game: {
         ...game,
         // Đảm bảo lấy danh sách player tươi nhất từ room nếu có thể (tùy chọn)
@@ -326,20 +357,22 @@ export function registerWordScrambleGameHandlers(io, socket, rooms) {
   })
 
   socket.on('wordScrambleGame:nextWord', ({ roomCode, wordData }) => {
-    const game = activeGames.get(roomCode)
+    const code = normalizeRoomCode(roomCode)
+    const game = activeGames.get(code)
     if (!game) return
     game.currentWord = wordData
     game.currentRoundId += 1
     scheduleRoundTimeout(io, game)
-    io.to(roomChannel(roomCode)).emit('wordScrambleGame:newWord', { wordData })
+    io.to(roomChannel(code)).emit('wordScrambleGame:newWord', { wordData })
   })
 
   socket.on('wordScrambleGame:leave', ({ roomCode }) => {
-    socket.leave(roomChannel(roomCode))
-    const game = activeGames.get(roomCode)
+    const code = normalizeRoomCode(roomCode)
+    socket.leave(roomChannel(code))
+    const game = activeGames.get(code)
     if (game) {
       // Có thể xử lý khi người chơi thoát hẳn (xử thua hoặc kết thúc)
-      if (game.status !== 'playing') clearRoundTimer(roomCode)
+      if (game.status !== 'playing') clearRoundTimer(code)
     }
   })
 }

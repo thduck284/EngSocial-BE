@@ -94,7 +94,6 @@ export const createPost = async (req, res, next) => {
           level:           mod.level        ?? 'medium',
           violationScore:  mod.violationScore ?? 0,
           confidence:      mod.confidence     ?? 0,
-          keywords:        mod.keywords      ?? [],
         },
       }, req)
     }
@@ -135,7 +134,6 @@ export const updatePost = async (req, res, next) => {
           level:          mod.level         ?? 'medium',
           violationScore: mod.violationScore ?? 0,
           confidence:     mod.confidence     ?? 0,
-          keywords:       mod.keywords       ?? [],
         },
       }, req)
     }

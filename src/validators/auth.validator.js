@@ -177,3 +177,29 @@ export const resetPasswordSchema = Joi.object({
       'any.required': 'Mật khẩu mới là bắt buộc',
     }),
 })
+
+/**
+ * Verify email validation schema
+ */
+export const verifyEmailSchema = Joi.object({
+  token: Joi.string()
+    .required()
+    .messages({
+      'any.required': 'Token là bắt buộc',
+    }),
+})
+
+/**
+ * Resend verification email validation schema
+ */
+export const resendVerificationSchema = Joi.object({
+  email: Joi.string()
+    .email()
+    .lowercase()
+    .trim()
+    .required()
+    .messages({
+      'string.email': 'Email không hợp lệ',
+      'any.required': 'Email là bắt buộc',
+    }),
+})

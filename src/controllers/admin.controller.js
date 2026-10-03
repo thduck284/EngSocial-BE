@@ -1,5 +1,7 @@
 import * as adminService from '../services/admin.service.js'
 import { sendSuccess, sendError, sendPaginated } from '../dto/index.js'
+import Lesson from '../models/learning/Lesson.js'
+import { User } from '../models/index.js'
 
 // ========== USER MANAGEMENT ==========
 
@@ -137,10 +139,24 @@ export const getAllLessons = async (req, res, next) => {
 
 export const updateLessonStatus = async (req, res, next) => {
   try {
-    const lesson = await adminService.updateLessonStatus(req.params.id, req.body)
+    const lesson = await Lesson.findById(req.params.id).select('level').lean()
+    if (!lesson) {
+      return sendError(res, { statusCode: 404, messageKey: 'lesson.notFound' }, req)
+    }
+    // Enforce moderator level check
+    const requester = await User.findById(req.userId).select('role moderatorLevel').lean()
+    if (requester && requester.role === 'moderator') {
+      if (!requester.moderatorLevel || requester.moderatorLevel !== lesson.level) {
+        return sendError(res, {
+          statusCode: 403,
+          message: `Moderator level '${requester.moderatorLevel || 'none'}' is not allowed to manage level '${lesson.level}' lessons.`,
+        }, req)
+      }
+    }
+    const updated = await adminService.updateLessonStatus(req.params.id, req.body)
     return sendSuccess(res, {
       messageKey: 'admin.lessonStatusUpdated',
-      data: { lesson },
+      data: { lesson: updated },
     }, req)
   } catch (error) {
     if (error.message === 'LESSON_NOT_FOUND') {

@@ -20,7 +20,8 @@
     "db:seed:quest-pool": "node database/seed-periodic-quest-pool.js",
     "db:seed:all": "node database/seed.js",
     "db:migrate:mocktest-rl": "node database/migrate-mocktest-rl-graded.js",
-    "db:migrate:mocktest-status": "node database/migrate-mocktest-session-status.js"
+    "db:migrate:mocktest-status": "node database/migrate-mocktest-session-status.js",
+    "db:verify-all-emails": "node scripts/verify-all-emails.js"
   },
   "keywords": [
     "engsocial",

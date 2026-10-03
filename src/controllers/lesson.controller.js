@@ -1,11 +1,48 @@
 import mongoose from 'mongoose'
 import Lesson from '../models/learning/Lesson.js'
 import UserLessonProgress from '../models/learning/UserLessonProgress.js'
+import { User } from '../models/index.js'
 import * as lessonService from '../services/lesson.service.js'
 import { LessonDTO, LessonDetailDTO } from '../dto/learning/response/lesson.response.js'
 import { sendSuccess, sendPaginated, sendError } from '../dto/index.js'
 import { generateUniqueSlug } from '../utils/slug.js'
 import { checkAndUnlockAchievements } from '../services/achievementUnlock.service.js'
+
+function sanitizeAiCopyPercent(data, isLecturer) {
+  if (isLecturer) return data
+  if (!data) return data
+
+  const obj = data.toObject ? data.toObject() : JSON.parse(JSON.stringify(data))
+
+  const cleanSubmission = (sub) => {
+    if (sub) {
+      delete sub.aiCopyPercent
+    }
+  }
+
+  if (Array.isArray(obj)) {
+    obj.forEach((item) => {
+      if (item.submission) cleanSubmission(item.submission)
+      if (Array.isArray(item.attemptHistory)) {
+        item.attemptHistory.forEach((att) => {
+          if (att.submission) cleanSubmission(att.submission)
+        })
+      }
+    })
+  } else {
+    if (obj.submission) {
+      cleanSubmission(obj.submission)
+    }
+    if (Array.isArray(obj.attemptHistory)) {
+      obj.attemptHistory.forEach((att) => {
+        if (att.submission) cleanSubmission(att.submission)
+      })
+    }
+  }
+
+  return obj
+}
+
 
 /**
  * Get lessons list with optional filters and pagination
@@ -88,7 +125,10 @@ export const getMyProgress = async (req, res, next) => {
       page: parseInt(page, 10) || 1,
       limit: Math.min(50, Math.max(1, parseInt(limit, 10) || 10)),
     })
-    return sendPaginated(res, { data: result.progress, pagination: result.pagination }, req)
+    const requestingUser = await User.findById(req.userId).select('role').lean()
+    const isLecturer = requestingUser && ['admin', 'moderator'].includes(requestingUser.role)
+    const sanitizedData = sanitizeAiCopyPercent(result.progress, isLecturer)
+    return sendPaginated(res, { data: sanitizedData, pagination: result.pagination }, req)
   } catch (error) {
     next(error)
   }
@@ -171,12 +211,46 @@ export const getLessonById = async (req, res, next) => {
 }
 
 /**
- * Create lesson (admin)
+ * Helper: check if requesting moderator is allowed to operate on a lesson of a given level.
+ * Admin always passes. Moderator must have matching moderatorLevel.
+ * @param {string} requesterId - req.userId
+ * @param {string} lessonLevel - lesson's level field (e.g. 'B1')
+ * @param {import('express').Response} res
+ * @param {import('express').Request} req
+ * @returns {Promise<boolean>} true if allowed, false if error was already sent
+ */
+async function checkModeratorLevel(requesterId, lessonLevel, res, req) {
+  const requester = await User.findById(requesterId).select('role moderatorLevel').lean()
+  if (!requester) {
+    sendError(res, { statusCode: 401, message: 'Unauthorized' }, req)
+    return false
+  }
+  if (requester.role === 'admin') return true
+  if (requester.role === 'moderator') {
+    if (!requester.moderatorLevel || requester.moderatorLevel !== lessonLevel) {
+      sendError(res, {
+        statusCode: 403,
+        message: `Moderator level '${requester.moderatorLevel || 'none'}' is not allowed to operate on level '${lessonLevel}' lessons.`,
+      }, req)
+      return false
+    }
+    return true
+  }
+  sendError(res, { statusCode: 403, message: 'Forbidden' }, req)
+  return false
+}
+
+/**
+ * Create lesson (admin/moderator)
  * POST /api/lessons
  */
 export const createLesson = async (req, res, next) => {
   try {
     const body = req.body
+    const lessonLevel = body.level || 'A1'
+    const allowed = await checkModeratorLevel(req.userId, lessonLevel, res, req)
+    if (!allowed) return
+
     const slug = body.slug || generateUniqueSlug(body.title || 'lesson')
     const existing = await Lesson.findOne({ slug })
     if (existing) {
@@ -187,7 +261,7 @@ export const createLesson = async (req, res, next) => {
       title: body.title,
       slug,
       skill: body.skill || 'reading',
-      level: body.level || 'A1',
+      level: lessonLevel,
       category: body.category || 'lesson',
       topic: body.topic,
       description: body.description,
@@ -217,7 +291,7 @@ export const createLesson = async (req, res, next) => {
 }
 
 /**
- * Update lesson (admin)
+ * Update lesson (admin/moderator)
  * PUT /api/lessons/:id
  */
 export const updateLesson = async (req, res, next) => {
@@ -227,13 +301,16 @@ export const updateLesson = async (req, res, next) => {
     if (!lesson) {
       return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
     }
+    const allowed = await checkModeratorLevel(req.userId, lesson.level, res, req)
+    if (!allowed) return
+
     const body = req.body
-    const allowed = [
+    const allowedFields = [
       'title', 'slug', 'skill', 'level', 'category', 'topic', 'description', 'thumbnail',
       'content', 'questions', 'vocabulary', 'estimatedTime', 'xpReward', 'totalQuestions',
       'featured', 'time', 'accent', 'practiceType', 'length', 'order', 'tags',
     ]
-    for (const key of allowed) {
+    for (const key of allowedFields) {
       if (body[key] !== undefined) {
         lesson[key] = body[key]
       }
@@ -250,16 +327,20 @@ export const updateLesson = async (req, res, next) => {
 }
 
 /**
- * Delete lesson (admin)
+ * Delete lesson (admin/moderator)
  * DELETE /api/lessons/:id
  */
 export const deleteLesson = async (req, res, next) => {
   try {
     const { id } = req.params
-    const deleted = await Lesson.findByIdAndDelete(id)
-    if (!deleted) {
+    const lesson = await Lesson.findById(id)
+    if (!lesson) {
       return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
     }
+    const allowed = await checkModeratorLevel(req.userId, lesson.level, res, req)
+    if (!allowed) return
+
+    await Lesson.findByIdAndDelete(id)
     return sendSuccess(res, { message: 'Deleted' }, req)
   } catch (error) {
     next(error)
@@ -478,7 +559,10 @@ export const getLessonProgress = async (req, res, next) => {
     const { id } = req.params
     const { attemptNo } = req.query
     const data = await lessonService.getLessonProgressByUser(id, req.userId, { attemptNo })
-    return sendSuccess(res, { data }, req)
+    const requestingUser = await User.findById(req.userId).select('role').lean()
+    const isLecturer = requestingUser && ['admin', 'moderator'].includes(requestingUser.role)
+    const sanitizedData = sanitizeAiCopyPercent(data, isLecturer)
+    return sendSuccess(res, { data: sanitizedData }, req)
   } catch (error) {
     if (error.message === 'LESSON_NOT_FOUND') {
       return sendError(res, { statusCode: 404, message: 'Lesson not found' }, req)
@@ -765,6 +849,8 @@ export const syncLessonQuizScores = async (req, res, next) => {
 /**
  * Grade user writing submission (Admin/Mod)
  * POST /api/lessons/:id/grade/:userId
+ * Note: For writing skill, moderator's level must match lesson level.
+ *       For reading/listening, level check is skipped for grading.
  */
 export const gradeUserWriting = async (req, res, next) => {
   try {
@@ -773,6 +859,13 @@ export const gradeUserWriting = async (req, res, next) => {
     
     if (score === undefined || score === null) {
       return sendError(res, { statusCode: 400, message: 'Score is required' }, req)
+    }
+
+    // For writing lessons, enforce moderator level check
+    const lesson = await Lesson.findById(id).select('skill level').lean()
+    if (lesson && lesson.skill === 'writing') {
+      const allowed = await checkModeratorLevel(req.userId, lesson.level, res, req)
+      if (!allowed) return
     }
 
     const result = await lessonService.gradeUserWriting(id, userId, { score, feedback, attemptNo })
@@ -798,14 +891,18 @@ export const aiGradeWriting = async (req, res, next) => {
     const { id, userId } = req.params
     const { attemptNo, sessionCompletedAt } = req.body || {}
 
-    if (req.userId !== userId && !req.isModerator && !req.isAdmin) {
+    const requestingUser = await User.findById(req.userId).select('role').lean()
+    const isLecturer = requestingUser && ['admin', 'moderator'].includes(requestingUser.role)
+
+    if (req.userId !== userId && !isLecturer) {
       return sendError(res, { statusCode: 403, message: 'Forbidden' }, req)
     }
 
     const result = await lessonService.aiGradeWriting(id, userId, { attemptNo, sessionCompletedAt })
+    const sanitizedData = sanitizeAiCopyPercent(result, isLecturer)
     return sendSuccess(res, {
       message: 'AI grading completed',
-      data: result,
+      data: sanitizedData,
     }, req)
   } catch (error) {
     if (error.message === 'NO_SUBMISSION_CONTENT') {

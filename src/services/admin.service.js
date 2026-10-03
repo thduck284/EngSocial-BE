@@ -126,7 +126,7 @@ export const deleteUserByAdmin = async (requesterId, targetUserId) => {
 /**
  * Update user role (admin)
  */
-export const updateUserRole = async (userId, { role }) => {
+export const updateUserRole = async (userId, { role, moderatorLevel }) => {
   const user = await User.findById(userId)
   if (!user) throw new Error('USER_NOT_FOUND')
   if (!['user', 'admin', 'moderator'].includes(role)) throw new Error('INVALID_ROLE')
@@ -135,6 +135,15 @@ export const updateUserRole = async (userId, { role }) => {
     if (adminCount <= 1) throw new Error('CANNOT_DEMOTE_LAST_ADMIN')
   }
   user.role = role
+  if (role === 'moderator') {
+    if (moderatorLevel && ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].includes(moderatorLevel)) {
+      user.moderatorLevel = moderatorLevel
+    } else {
+      user.moderatorLevel = user.moderatorLevel || 'A1'
+    }
+  } else {
+    user.moderatorLevel = ''
+  }
   await user.save()
   return new UserDTO(user)
 }

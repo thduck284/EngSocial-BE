@@ -23,6 +23,38 @@ const wordScrambleWordSchema = new mongoose.Schema(
       maxlength: 1000,
       default: '',
     },
+    synonyms: [{
+      type: String,
+      trim: true,
+    }],
+    antonyms: [{
+      type: String,
+      trim: true,
+    }],
+    sentenceTemplate: {
+      type: String,
+      trim: true,
+      maxlength: 1000,
+      default: '',
+    },
+    wrongSentence: {
+      type: String,
+      trim: true,
+      maxlength: 1000,
+      default: '',
+    },
+    wrongWord: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+      default: '',
+    },
+    emoji: {
+      type: String,
+      trim: true,
+      maxlength: 50,
+      default: '',
+    },
     difficulty: {
       type: String,
       required: true,

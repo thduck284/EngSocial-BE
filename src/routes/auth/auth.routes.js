@@ -11,6 +11,8 @@ import {
   updatePreferencesSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
+  verifyEmailSchema,
+  resendVerificationSchema,
 } from '../../validators/auth.validator.js'
 
 const router = Router()
@@ -84,5 +86,19 @@ router.post('/forgot-password', validate(forgotPasswordSchema), authController.f
  * @access  Public
  */
 router.post('/reset-password', validate(resetPasswordSchema), authController.resetPassword)
+
+/**
+ * @route   POST /api/auth/verify-email
+ * @desc    Verify email with token from signup link
+ * @access  Public
+ */
+router.post('/verify-email', validate(verifyEmailSchema), authController.verifyEmail)
+
+/**
+ * @route   POST /api/auth/resend-verification
+ * @desc    Resend signup verification email
+ * @access  Public
+ */
+router.post('/resend-verification', validate(resendVerificationSchema), authController.resendVerification)
 
 export default router
